@@ -146,6 +146,11 @@ int main(int argc, char* argv[]) {
   moab::Range tris;
   moab::Range vert_set;
   moab::Range move_sets;
+  moab::Range child_sets;
+  int num_tris;
+  moab::Range::iterator it;
+
+  child_sets.clear();
   move_sets.clear();
 
   rval = mbi->create_meshset(moab::MESHSET_SET, moving);
@@ -157,16 +162,21 @@ int main(int argc, char* argv[]) {
       if( DAG->has_prop( vol, "moving"))
         {
           move_sets.insert(vol);
-
-          mbi->add_entities(moving, &vol, 1);
+          mbi->get_child_meshsets(vol, child_sets);
+         for (it = child_sets.begin(); it != child_sets.end(); it++)
+           {
+             mbi->add_entities(moving, &(*it), 1);
+             //rval =  mbi->get_number_entities_by_type(moving, moab::MBTRI, num_tris);
+             rval =  mbi->get_number_entities_by_type(*it, moab::MBVERTEX, num_tris);
+             CHECK_ERR(rval);
+             std::cout<< "num dim 1 " << num_tris << std::endl;
+        
+           }
         }
     }
-  std::cout << "num move vols " << move_sets.size() << std::endl;
+  std::cout << "num move surfs " << child_sets.size() << std::endl;
+  
 
-  int num_tris;
-  rval =  mbi->get_number_entities_by_type(moving, moab::MBTRI, num_tris);
-  CHECK_ERR(rval);
-  std::cout<< "num dim 3" << num_tris << std::endl;
 
   rval =  mbi->get_entities_by_type(moving, moab::MBTRI, tris);
   CHECK_ERR(rval);
@@ -177,7 +187,6 @@ int main(int argc, char* argv[]) {
   std::cout << "num moving verts: " << vert_set.size() << std::endl;
 
   // move verts according to transformation
-  moab::Range::iterator it;
   const double x=0.0, y=0.0, z=0.0;
   double xyz[3], xyz_new[3];
  
