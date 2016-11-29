@@ -111,7 +111,7 @@ double* get_dist_uvec_td(double total_dist, double dist_per_shot, double unit_ve
 
  */
 
-
+/*
 double get_dist_to_axis(double xyz_P[3], double xyz_L0[3], double xyz_L1[3])
 //double get_dist_to_axis(xyz_P, xyz_L0, xyz_L1)
 {
@@ -143,7 +143,11 @@ double get_dist_to_axis(double xyz_P[3], double xyz_L0[3], double xyz_L1[3])
   return sqrt(dot(d,d));
 
 }
+*/
 
+/* Funtion to rotate a 3D point a distance theta 
+   around any line (given by two points)
+*/
 XYZ rotate_point(XYZ P, double theta, XYZ L1, XYZ L2)
 {
    XYZ v, u, q1, q2;
@@ -216,44 +220,15 @@ XYZ rotate_point(XYZ P, double theta, XYZ L1, XYZ L2)
    return(q1);
 }
 
-int main(int argc, char* argv[]) {
-
-  //double P[3] = {1, 0, 0};
-  //double L0[3] = {0, 0, -53};
-  //double L1[3] = {0, 0, 1};
-  
-  double distance;
-//  distance = get_dist_to_axis(P, L0, L1);
-//  std::cout << "distance: " <<  distance << std::endl;
-
-  
-
-  moab::Core *mbi = new moab::Core();
-  
-  std::string output_file = "moved.h5m";
-
-  get_all_handles(mbi);
-
-  moab::ErrorCode rval;  
-  rval = mbi->load_file("pie.h5m");
-
-  DAG = new moab::DagMC(mbi);
-
-  rval = DAG->load_existing_contents();
-  CHECK_ERR(rval);
-
-//  rval = DAG->setup_obbs();
-//  CHECK_ERR(rval);
- 
-  rval = DAG->setup_indices();
-//  CHECK_ERR(rval);
+moab::Range get_tagged_entities(moab::Core *mbi, int total_cells, std::string tag_name)
+{
+  moab::ErrorCode rval;
 
   // get moving tag from parse_properties
   std::vector<std::string> group_name;
   std::map<std::string, std::string> group_name_synonyms;
 
-  group_name.push_back("moving");
-  group_name.push_back("mat:Graveyard");
+  group_name.push_back(tag_name);
 
   rval = DAG->parse_properties(group_name, group_name_synonyms);
   if (moab::MB_SUCCESS != rval) 
@@ -261,31 +236,25 @@ int main(int argc, char* argv[]) {
       std::cerr << "DAGMC failed to parse metadata properties" <<  std::endl;
       exit(EXIT_FAILURE);
     }
-  
-  // get all volumes
-  int num_cells = DAG->num_entities( 3 );
-  std::cout << "num cells: " << num_cells << std::endl;
- 
-  // get all triangles in vols that are moving
-  moab::EntityHandle moving, grave;
-  moab::Range vert_set, moving_verts, mv, g_vert_set, grave_verts, gv;
-  moab::Range surf_set, g_surf_set;
+
+  // get all triangles in vols that have tag
+  moab::EntityHandle tagged_meshset;
+  moab::Range vert_set;
+  moab::Range surf_set;
+  moab::Range tagged_verts;
   int num_tris, num_verts;
-  moab::Range::iterator it, itr, its;
+  moab::Range::iterator it, itr;
 
   surf_set.clear();
   vert_set.clear();
 
-  rval = mbi->create_meshset(moab::MESHSET_SET, moving);
-  CHECK_ERR(rval);
+  rval = mbi->create_meshset(moab::MESHSET_SET, tagged_meshset);
+  //CHECK_ERR(rval);
 
-  rval = mbi->create_meshset(moab::MESHSET_SET, grave);
-  CHECK_ERR(rval);
-
-  for( int i = 1; i <= num_cells; ++i ) 
+  for( int i = 1; i <= total_cells; ++i ) 
     {  
       moab::EntityHandle vol = DAG->entity_by_index( 3, i );
-      if( DAG->has_prop( vol, "moving"))
+      if( DAG->has_prop( vol, tag_name))
         {
           mbi->get_child_meshsets(vol, surf_set);
           for (it = surf_set.begin(); it != surf_set.end(); it++)
@@ -293,50 +262,67 @@ int main(int argc, char* argv[]) {
              rval =  mbi->get_entities_by_type(*it, moab::MBVERTEX, vert_set);
              for (itr = vert_set.begin(); itr != vert_set.end(); itr++)
                {
-                 mv.insert(*itr);
+                 tagged_verts.insert(*itr);
                }
            }
         }
-      if( DAG->has_prop( vol, "mat:Graveyard"))
-        {
-          mbi->get_child_meshsets(vol, g_surf_set);
-          for (it = g_surf_set.begin(); it != g_surf_set.end(); it++)
-           {
-             rval =  mbi->get_entities_by_type(*it, moab::MBVERTEX, g_vert_set);
-             for (itr = g_vert_set.begin(); itr != g_vert_set.end(); itr++)
-               {
-                 gv.insert(*itr);
-               }
-           }
           
-        }
-      
     }
 
-  std::cout << "num moving verts: " << mv.size() << std::endl;
-  std::cout << "num grave verts: " << gv.size() << std::endl;
+  return tagged_verts;
+}
 
-
-  // move verts according to transformation
-  const double x=0.0, y=0.0, z=0.0;
-  double xyz[3], xyz_new[3];
+int main(int argc, char* argv[]) 
+{
+  moab::ErrorCode rval; 
  
-//  double unit_vec[3];
-  double dist[3];
-//  double v_0[3] = {100, 0, 0};
-//  double v[3];
+  moab::Core *mbi = new moab::Core();
+ 
+  // get all moab tag handles 
+  get_all_handles(mbi);
 
+  // load base geometry file that we wish to move
+  rval = mbi->load_file("pie.h5m");
+
+  DAG = new moab::DagMC(mbi);
+
+  rval = DAG->load_existing_contents();
+  CHECK_ERR(rval);
+
+  //  rval = DAG->setup_obbs();
+  //  CHECK_ERR(rval);
+ 
+  rval = DAG->setup_indices();
+  //  CHECK_ERR(rval);
+
+
+  
+  // get all volumes
+  int num_cells = DAG->num_entities( 3 );
+  std::cout << "num cells: " << num_cells << std::endl;
+ 
+  moab::Range mv;
+  mv = get_tagged_entities(mbi, num_cells, "moving");
+
+  std::cout << "num moving verts: " << mv.size() << std::endl;
+  //std::cout << "num grave verts: " << gv.size() << std::endl;
+
+  //Inital point, updated point
+  XYZ p_0, p, p_new;
+  double xyz[3], xyz_new[3];
+
+  int transform; // 0 for tranlation, 1 for rotation
+
+  // TRANSLATION
+  //transform = 0;
+
+  // initial velocity vector for 3D translation
   XYZ v, v_0;
   v_0.x = 100;
   v_0.y = 0;
   v_0.z = 0;
 
-//  double a[3] = {0, 0, 0};
-  // a(t) = a[0] + a[1]t + a[2]t^2
-  double ax[3] = {0, 0, 0};
-  double ay[3] = {0, 0, 0};
-  double az[3] = {0, 0, 0};
-
+  // acceleration vector for 3D translation
   // a(t) = b + ct + dt^2
   XYZ b, c, d;
   b.x = 0;
@@ -348,44 +334,38 @@ int main(int argc, char* argv[]) {
   b.z = 0;
   c.z = 0;
   d.z = 0;
+
+
+  // ROTATION
+  transform = 1;
  
-  XYZ p, p_0, p_new, L0, L1;
-//  P.x = 1;
-//  P.y = 0;
-//  P.z = 0;
-  
+  // alpha(t) = alpha[0]+ alpha[1]*t + alpha[2]t^2
+  double alpha[3] = {0, 0, 0}; //angular acceleration [rad/s^2]
+  double omega, omega_0 = M_PI/2; //angular velocity [rad/s]
+  double theta; //displacement [rad]
+
+  // Two points that define line points rotate about 
+  XYZ L0, L1;
   L0.x = 0;
   L0.y = 250;
   L0.z = 0;
-
   L1.x = 0;
   L1.y = 250;
   L1.z = 1;
 
-  //double angle = 90.0;
-  //double theta = angle*M_PI/180.0;  
+  double t = 0.0; //current time [s]
+  double ts = 0.25; //length of time step [s]
+  double end_t = 24.0; //end time [s]
+  int shot_num = 0; //current time step
 
-  // theta [rad], omega_0 [rad/s], alpha [rad/s^2]
-  double theta, omega, omega_0 = M_PI/2;
-  double alpha[3] = {0, 0, 0};
 
-  //P_prime = rotate_point(P, theta, L0, L1);
- // std::cout << "old, new x " << P.x << " " << roundf(P_prime.x*100)/100 << std::endl;
-  
- 
-//  double speed = 1.0;
-  double t = 0.0; 
-  double ts = 1.0; 
-  double end_t = 4.0;
-  int shot_num = 0;
-//  time = total_dist/speed;
-//  dist_per_shot = total_dist/num_shots;
-//  double* unit_vec[3] = get_unit_vec(dir_vec);
-//  double* dist[3] = get_dist_uvec_td(total_dist, dist_per_shot, unit_vec);
- 
-  int transform = 0; 
   std::map<moab::EntityHandle, XYZ> position;
  
+  //base output file name 
+  std::string output_file = "moved.h5m";
+
+  moab::Range::iterator its;
+
   while (t <= end_t)
     {
       for (its = mv.begin(); its != mv.end(); ++its)
@@ -401,42 +381,30 @@ int main(int argc, char* argv[]) {
               p.z = xyz[2];
 
               //map original position
-              position[*its]=p;
+              position[*its] = p;
             }
+
           else
             {
               // get original position
               p_0 = position.find(*its)->second;
  
-              //if rotation
+              //if translation
               if (transform == 0)
+                {
+                   p_new.x = p_0.x + v_0.x*t + (1/2)*b.x*pow(t,2) + (1/6)*c.x*pow(t,3) + (1/12)*d.x*pow(t,4);
+                   p_new.y = p_0.y + v_0.y*t + (1/2)*b.y*pow(t,2) + (1/6)*c.y*pow(t,3) + (1/12)*d.y*pow(t,4);
+                   p_new.z = p_0.z + v_0.z*t + (1/2)*b.z*pow(t,2) + (1/6)*c.z*pow(t,3) + (1/12)*d.z*pow(t,4);
+                }
+           
+              //if rotation
+              if (transform == 1)
                 { 
                   omega = omega_0 + alpha[0]*t + (1/2)*alpha[1]*pow(t,2) + (1/3)*alpha[2]*pow(t,3);
                   theta = omega*t;
                   p_new = rotate_point(p_0, theta, L0, L1);
                 }
-              //if translation
-              if (transform == 1)
-                {
-                  //xyz_new[0] = xyz[0] + v_0[0]*ts + (1/2)*ax[0]*pow(ts,2) + (1/6)*ax[1]*pow(ts,3) + (1/12)*ax.z*pow(ts,4);
-                  //xyz_new[1] = xyz[1] + v_0[1]*ts + (1/2)*ay[0]*pow(ts,2) + (1/6)*ay[1]*pow(ts,3) + (1/12)*ay[2]*pow(ts,4);
-                  //xyz_new[2] = xyz[2] + v_0[2]*ts + (1/2)*az[0]*pow(ts,2) + (1/6)*az[1]*pow(ts,3) + (1/12)*az[2]*pow(ts,4);
-           
-                   p_new.x = p_0.x + v_0.x*t + (1/2)*b.x*pow(t,2) + (1/6)*c.x*pow(t,3) + (1/12)*d.x*pow(t,4);
-                   p_new.y = p_0.y + v_0.y*t + (1/2)*b.y*pow(t,2) + (1/6)*c.y*pow(t,3) + (1/12)*d.y*pow(t,4);
-                   p_new.z = p_0.z + v_0.z*t + (1/2)*b.z*pow(t,2) + (1/6)*c.z*pow(t,3) + (1/12)*d.z*pow(t,4);
-       
-                   //update v
-                   //v_0.x = v_0.x + b.x*ts + (1/2)*c.x*pow(ts,2) + (1/3)*d.x*pow(ts,3);  
-                   //v_0.y = v_0.y + b.y*ts + (1/2)*c.y*pow(ts,2) + (1/3)*d.y*pow(ts,3);
-                   //v_0.z = v_0.z + b.z*ts + (1/2)*c.z*pow(ts,2) + (1/3)*d.z*pow(ts,3);
-               
-                   //v_0[0] = v[0];
-                   //v_0[1] = v[1];
-                   //v_0[2] = v[2];
-                }
-           
-           
+
               xyz_new[0] = p_new.x;
               xyz_new[1] = p_new.y;
               xyz_new[2] = p_new.z;
