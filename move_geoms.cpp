@@ -83,67 +83,6 @@ moab::ErrorCode get_all_handles(moab::Core *mbi)
 */
   return moab::MB_SUCCESS;
 }
-/*
-void get_xyz_dists(double dx, double dy, double dz, double total_dist, int num_shots, double &dist_x, double &dist_y, double &dist_z)
-{
-  double mag;
-  //double unit_vec[3];
-  double dist_per_shot;
-
-  mag = sqrt(pow(dx, 2.0) + pow(dy, 2.0) + pow(dz, 2.0));
-  ux[0] = dx/mag;
-  uy[1] = dy[1]/mag;
-  uz[2] = dz[2]/mag;
-
-  dist_per_shot = total_dist/num_shots;
-  dist_x = dist_per_shot*ux;
-  dist_y = dist_per_shot*uy;
-  dist_z = dist_per_shot*uz;
-}
-
-double* get_dist_uvec_td(double total_dist, double dist_per_shot, double unit_vec[3])
-{
-  static double dist[3];
-
-
-  return dist;
-}
-
- */
-
-/*
-double get_dist_to_axis(double xyz_P[3], double xyz_L0[3], double xyz_L1[3])
-//double get_dist_to_axis(xyz_P, xyz_L0, xyz_L1)
-{
-  double v[3], w[3];
-  v[0] = xyz_L1[0] - xyz_L0[0];
-  v[1] = xyz_L1[1] - xyz_L0[1];
-  v[2] = xyz_L1[2] - xyz_L0[2];
-
-  w[0] = xyz_P[0] - xyz_L0[0];
-  w[1] = xyz_P[1] - xyz_L0[1];
-  w[2] = xyz_P[2] - xyz_L0[2];
-
-  double c1, c2, b;
-  c1 = dot(w,v);
-  c2 = dot(v,v);
-  b = c1/c2;
-  
-  double Pb[3];
-  Pb[0] = xyz_L0[0] + b*v[0];
-  Pb[1] = xyz_L0[1] + b*v[1];
-  Pb[2] = xyz_L0[2] + b*v[2];
-
-  //get distance from P to Pb
-  double d[3], distance;
-  d[0] = Pb[0] - xyz_P[0];   
-  d[1] = Pb[1] - xyz_P[1];   
-  d[2] = Pb[2] - xyz_P[2];   
-
-  return sqrt(dot(d,d));
-
-}
-*/
 
 /* Funtion to rotate a 3D point a distance theta 
    around any line (given by two points)
@@ -272,40 +211,43 @@ moab::Range get_tagged_entities(moab::Core *mbi, int total_cells, std::string ta
   return tagged_verts;
 }
 
-int main(int argc, char* argv[]) 
+moab::ErrorCode setup(moab::Core *mbi)
 {
-  moab::ErrorCode rval; 
- 
-  moab::Core *mbi = new moab::Core();
- 
-  // get all moab tag handles 
-  get_all_handles(mbi);
-
-  // load base geometry file that we wish to move
-  rval = mbi->load_file("pie.h5m");
-
   DAG = new moab::DagMC(mbi);
 
   rval = DAG->load_existing_contents();
   CHECK_ERR(rval);
 
-  //  rval = DAG->setup_obbs();
-  //  CHECK_ERR(rval);
+  rval = DAG->setup_obbs();
+  CHECK_ERR(rval);
  
   rval = DAG->setup_indices();
-  //  CHECK_ERR(rval);
+  CHECK_ERR(rval);
 
+  // get all moab tag handles 
+  rval = get_all_handles(mbi);
+  CHECK_ERR(rval);
 
-  
+}
+
+int main(int argc, char* argv[]) 
+{
+  moab::ErrorCode rval; 
+ 
+  moab::Core *mbi = new moab::Core();
+
+  // load base geometry file that we wish to move
+  rval = mbi->load_file(argv[1]);
+
+  setup(mbi);
+
   // get all volumes
   int num_cells = DAG->num_entities( 3 );
   std::cout << "num cells: " << num_cells << std::endl;
- 
+
+  // get moving vertices 
   moab::Range mv;
   mv = get_tagged_entities(mbi, num_cells, "moving");
-
-  std::cout << "num moving verts: " << mv.size() << std::endl;
-  //std::cout << "num grave verts: " << gv.size() << std::endl;
 
   //Inital point, updated point
   XYZ p_0, p, p_new;
@@ -354,11 +296,11 @@ int main(int argc, char* argv[])
   L1.z = 1;
 
   double t = 0.0; //current time [s]
-  double ts = 0.25; //length of time step [s]
-  double end_t = 24.0; //end time [s]
+  double ts = 2.0; //length of time step [s]
+  double end_t = 4.0; //end time [s]
   int shot_num = 0; //current time step
 
-
+  // map of vertex eh to original position
   std::map<moab::EntityHandle, XYZ> position;
  
   //base output file name 
@@ -370,6 +312,7 @@ int main(int argc, char* argv[])
     {
       for (its = mv.begin(); its != mv.end(); ++its)
         {
+
           if(t == 0)
             {
               //get starting position
@@ -382,11 +325,13 @@ int main(int argc, char* argv[])
 
               //map original position
               position[*its] = p;
+            
             }
 
           else
             {
-              // get original position
+
+              //get original position
               p_0 = position.find(*its)->second;
  
               //if translation
@@ -408,6 +353,7 @@ int main(int argc, char* argv[])
               xyz_new[0] = p_new.x;
               xyz_new[1] = p_new.y;
               xyz_new[2] = p_new.z;
+
               rval = mbi->set_coords(&(*its), 1, xyz_new);
               CHECK_ERR(rval);
             }
