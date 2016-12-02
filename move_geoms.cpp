@@ -159,7 +159,7 @@ XYZ rotate_point(XYZ P, double theta, XYZ L1, XYZ L2)
    return(q1);
 }
 
-moab::Range get_tagged_entities(moab::Core *mbi, int total_cells, std::string tag_name)
+moab::Range get_tagged_entities(moab::Core *mbi, int total_cells, std::string tag_name, int dim)
 {
   moab::ErrorCode rval;
 
@@ -176,12 +176,11 @@ moab::Range get_tagged_entities(moab::Core *mbi, int total_cells, std::string ta
       exit(EXIT_FAILURE);
     }
 
-  // get all triangles in vols that have tag
+  // get desired tagged entities
   moab::EntityHandle tagged_meshset;
-  moab::Range vert_set;
-  moab::Range surf_set;
-  moab::Range tagged_verts;
-  int num_tris, num_verts;
+  moab::Range surf_set, vert_set;
+  moab::Range tagged_vols, tagged_verts, return_set;
+  int num_verts;
   moab::Range::iterator it, itr;
 
   surf_set.clear();
@@ -194,26 +193,49 @@ moab::Range get_tagged_entities(moab::Core *mbi, int total_cells, std::string ta
     {  
       moab::EntityHandle vol = DAG->entity_by_index( 3, i );
       if( DAG->has_prop( vol, tag_name))
-        {
-          mbi->get_child_meshsets(vol, surf_set);
-          for (it = surf_set.begin(); it != surf_set.end(); it++)
-           {
-             rval =  mbi->get_entities_by_type(*it, moab::MBVERTEX, vert_set);
-             for (itr = vert_set.begin(); itr != vert_set.end(); itr++)
-               {
-                 tagged_verts.insert(*itr);
-               }
-           }
+        { 
+          // if we want range of tagged volumes
+          if(dim == 3)
+            {
+              tagged_vols.insert(vol);
+              return_set = tagged_vols;
+            }
+
+          // if we want range of vertices belonging to tagged volumes
+          else if(dim == 1)
+            {
+               mbi->get_child_meshsets(vol, surf_set);
+               for (it = surf_set.begin(); it != surf_set.end(); it++)
+                {
+                  rval =  mbi->get_entities_by_type(*it, moab::MBVERTEX, vert_set);
+                  for (itr = vert_set.begin(); itr != vert_set.end(); itr++)
+                    {
+                      tagged_verts.insert(*itr);
+                    }
+                }
+
+               return_set = tagged_verts;
+            
+            }
         }
           
     }
 
-  return tagged_verts;
+  return return_set;
 }
 
-moab::ErrorCode setup(moab::Core *mbi)
+moab::ErrorCode setup(moab::Core *mbi, char* filename)
 {
+  moab::ErrorCode rval;
+
+  // get all moab tag handles 
+  rval = get_all_handles(mbi);
+  CHECK_ERR(rval);
+
   DAG = new moab::DagMC(mbi);
+
+  // load base geometry file that we wish to move
+  rval = mbi->load_file(filename);
 
   rval = DAG->load_existing_contents();
   CHECK_ERR(rval);
@@ -224,10 +246,6 @@ moab::ErrorCode setup(moab::Core *mbi)
   rval = DAG->setup_indices();
   CHECK_ERR(rval);
 
-  // get all moab tag handles 
-  rval = get_all_handles(mbi);
-  CHECK_ERR(rval);
-
 }
 
 int main(int argc, char* argv[]) 
@@ -236,18 +254,24 @@ int main(int argc, char* argv[])
  
   moab::Core *mbi = new moab::Core();
 
-  // load base geometry file that we wish to move
-  rval = mbi->load_file(argv[1]);
+  char* filename = argv[1];
 
-  setup(mbi);
+  rval = setup(mbi, filename);
+
 
   // get all volumes
   int num_cells = DAG->num_entities( 3 );
   std::cout << "num cells: " << num_cells << std::endl;
 
+  //get moving volumes
+  moab::Range vols;
+  vols = get_tagged_entities(mbi, num_cells, "moving", 3);
+  std::cout << "num moving vols " << vols.size() << std::endl;
+
   // get moving vertices 
   moab::Range mv;
-  mv = get_tagged_entities(mbi, num_cells, "moving");
+  mv = get_tagged_entities(mbi, num_cells, "moving", 1);
+  std::cout << "num moving verts " << mv.size() << std::endl;
 
   //Inital point, updated point
   XYZ p_0, p, p_new;
