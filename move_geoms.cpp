@@ -12,6 +12,8 @@ using moab::DagMC;
 #include <cmath>
 #include <stdlib.h>
 #include <stdio.h>
+#include <ctype.h>
+#include <string.h>
 
 #define CHECK_ERR(A) do { if (moab::MB_SUCCESS != (A)) {		     \
   std::cerr << "Failure (error code " << (A) << ") at " __FILE__ ":" \
@@ -19,6 +21,8 @@ using moab::DagMC;
   return A; } } while(false)
 
 #define dot(u,v)   (u[0]*v[0] + u[1]*v[1] + u[2]*v[2])
+
+// #define MB_OBB_TREE_TAG_NAME "OBB_TREE"
 
 moab::Tag category_tag;
 moab::Tag geom_tag;
@@ -71,13 +75,14 @@ moab::ErrorCode get_all_handles(moab::Core *mbi)
 			      moab::MB_TAG_SPARSE|moab::MB_TAG_CREAT );
 
   CHECK_ERR(rval);
+
 /*
-  rval = mbi->tag_get_handle( MB_OBB_TREE_TAG_NAME, 1, MB_TYPE_HANDLE, 
-                                obb_tree_tag, MB_TAG_DENSE );
+  rval = mbi->tag_get_handle( MB_OBB_TREE_TAG_NAME, 1, moab::MB_TYPE_HANDLE, 
+                                obb_tree_tag, moab::MB_TAG_DENSE );
   CHECK_ERR(rval);
 
-  rval = mbi->tag_get_handle( MB_OBB_TAG_NAME, 1, MB_TYPE_HANDLE,
-                                obb_tag, MB_TAG_DENSE );
+  rval = mbi->tag_get_handle( MB_OBB_TAG_NAME, 1, moab::MB_TYPE_HANDLE,
+                                obb_tag, moab::MB_TAG_DENSE );
   CHECK_ERR(rval);
 
 */
@@ -224,6 +229,61 @@ moab::Range get_tagged_entities(moab::Core *mbi, int total_cells, std::string ta
   return return_set;
 }
 
+moab::ErrorCode get_verts(moab::Core *mbi, moab::EntityHandle vol, moab::Range &verts)
+{
+  moab::ErrorCode rval;
+  moab::Range surf_set, vert_set;
+  int num_verts;
+  moab::Range::iterator it, itr;
+
+  surf_set.clear();
+  vert_set.clear();
+
+  mbi->get_child_meshsets(vol, surf_set);
+  for (it = surf_set.begin(); it != surf_set.end(); it++)
+   {
+     rval =  mbi->get_entities_by_type(*it, moab::MBVERTEX, vert_set);
+     for (itr = vert_set.begin(); itr != vert_set.end(); itr++)
+       {
+         verts.insert(*itr);
+       }
+   }
+}
+
+moab::Range get_tagged_vols(moab::Core *mbi, int total_cells, std::string tag_name)
+{
+  moab::ErrorCode rval;
+
+  // get tag from parse_properties
+  std::vector<std::string> group_name;
+  std::map<std::string, std::string> group_name_synonyms;
+
+  group_name.push_back(tag_name);
+
+  rval = DAG->parse_properties(group_name, group_name_synonyms);
+  if (moab::MB_SUCCESS != rval) 
+    {
+      std::cerr << "DAGMC failed to parse metadata properties" <<  std::endl;
+      exit(EXIT_FAILURE);
+    }
+
+  moab::EntityHandle tagged_meshset;
+  moab::Range tagged_vols;
+
+  rval = mbi->create_meshset(moab::MESHSET_SET, tagged_meshset);
+  //CHECK_ERR(rval);
+
+  for( int i = 1; i <= total_cells; ++i ) 
+    {  
+      moab::EntityHandle vol = DAG->entity_by_index( 3, i );
+      if( DAG->has_prop( vol, tag_name))
+        { 
+          tagged_vols.insert(vol);
+        }
+    }
+
+  return tagged_vols;
+}
 moab::ErrorCode setup(moab::Core *mbi, char* filename)
 {
   moab::ErrorCode rval;
@@ -254,10 +314,12 @@ int main(int argc, char* argv[])
  
   moab::Core *mbi = new moab::Core();
 
+
   char* filename = argv[1];
 
   rval = setup(mbi, filename);
 
+  moab::OrientedBoxTreeTool *obbTree = new moab::OrientedBoxTreeTool(mbi, "OBB", true);
 
   // get all volumes
   int num_cells = DAG->num_entities( 3 );
@@ -265,13 +327,9 @@ int main(int argc, char* argv[])
 
   //get moving volumes
   moab::Range vols;
-  vols = get_tagged_entities(mbi, num_cells, "moving", 3);
+  vols = get_tagged_vols(mbi, num_cells, "moving");
   std::cout << "num moving vols " << vols.size() << std::endl;
 
-  // get moving vertices 
-  moab::Range mv;
-  mv = get_tagged_entities(mbi, num_cells, "moving", 1);
-  std::cout << "num moving verts " << mv.size() << std::endl;
 
   //Inital point, updated point
   XYZ p_0, p, p_new;
@@ -330,60 +388,84 @@ int main(int argc, char* argv[])
   //base output file name 
   std::string output_file = "moved.h5m";
 
-  moab::Range::iterator its;
+  moab::Range surfs;
+  moab::Range mv;
+  moab::Range::iterator its, itt;
 
   while (t <= end_t)
     {
-      for (its = mv.begin(); its != mv.end(); ++its)
+      for (its = vols.begin(); its != vols.end(); ++its)
         {
+          //get obb tree root node
+          moab::EntityHandle obb_root;
+          DAG->get_root(*its, obb_root);
+          std::cout << "obb root eh" << obb_root << std::endl;
 
-          if(t == 0)
+          //delete obb tree
+          obbTree->delete_tree(obb_root);
+
+          //get verts of moving vol and add to range
+          mv.clear();
+          get_verts(mbi, *its, mv);
+          std::cout << "num moving verts " << mv.size() << std::endl;
+          
+          for (itt = mv.begin(); itt != mv.end(); ++itt)
             {
-              //get starting position
-              rval = mbi->get_coords(&(*its), 1, xyz);
-              CHECK_ERR(rval);
-           
-              p.x = xyz[0];
-              p.y = xyz[1];
-              p.z = xyz[2];
-
-              //map original position
-              position[*its] = p;
-            
-            }
-
-          else
-            {
-
-              //get original position
-              p_0 = position.find(*its)->second;
- 
-              //if translation
-              if (transform == 0)
+              if(t == 0)
                 {
-                   p_new.x = p_0.x + v_0.x*t + (1/2)*b.x*pow(t,2) + (1/6)*c.x*pow(t,3) + (1/12)*d.x*pow(t,4);
-                   p_new.y = p_0.y + v_0.y*t + (1/2)*b.y*pow(t,2) + (1/6)*c.y*pow(t,3) + (1/12)*d.y*pow(t,4);
-                   p_new.z = p_0.z + v_0.z*t + (1/2)*b.z*pow(t,2) + (1/6)*c.z*pow(t,3) + (1/12)*d.z*pow(t,4);
+                  //get starting position
+                  rval = mbi->get_coords(&(*itt), 1, xyz);
+                  CHECK_ERR(rval);
+               
+                  p.x = xyz[0];
+                  p.y = xyz[1];
+                  p.z = xyz[2];
+           
+                  //map original position
+                  position[*its] = p;
+                
                 }
            
-              //if rotation
-              if (transform == 1)
-                { 
-                  omega = omega_0 + alpha[0]*t + (1/2)*alpha[1]*pow(t,2) + (1/3)*alpha[2]*pow(t,3);
-                  theta = omega*t;
-                  p_new = rotate_point(p_0, theta, L0, L1);
+              else
+                {
+           
+                  //get original position
+                  p_0 = position.find(*itt)->second;
+           
+                  //if translation
+                  if (transform == 0)
+                    {
+                       p_new.x = p_0.x + v_0.x*t + (1/2)*b.x*pow(t,2) + (1/6)*c.x*pow(t,3) + (1/12)*d.x*pow(t,4);
+                       p_new.y = p_0.y + v_0.y*t + (1/2)*b.y*pow(t,2) + (1/6)*c.y*pow(t,3) + (1/12)*d.y*pow(t,4);
+                       p_new.z = p_0.z + v_0.z*t + (1/2)*b.z*pow(t,2) + (1/6)*c.z*pow(t,3) + (1/12)*d.z*pow(t,4);
+                    }
+               
+                  //if rotation
+                  if (transform == 1)
+                    { 
+                      omega = omega_0 + alpha[0]*t + (1/2)*alpha[1]*pow(t,2) + (1/3)*alpha[2]*pow(t,3);
+                      theta = omega*t;
+                      p_new = rotate_point(p_0, theta, L0, L1);
+                    }
+           
+                  xyz_new[0] = p_new.x;
+                  xyz_new[1] = p_new.y;
+                  xyz_new[2] = p_new.z;
+           
+                  rval = mbi->set_coords(&(*itt), 1, xyz_new);
+                  CHECK_ERR(rval);
                 }
 
-              xyz_new[0] = p_new.x;
-              xyz_new[1] = p_new.y;
-              xyz_new[2] = p_new.z;
-
-              rval = mbi->set_coords(&(*its), 1, xyz_new);
-              CHECK_ERR(rval);
-            }
+            }    
         }
 
-      rval = mbi->write_mesh( (std::to_string(shot_num)+output_file).c_str());
+      //build new obb trees for moving vols
+      //if((DAG->have_obb_tree()))
+        // std::cout << "obb already exists" << std::endl; 
+     
+      DAG->build_obbs(surfs, vols);
+
+//      rval = mbi->write_mesh( (std::to_string(shot_num)+output_file).c_str());
       shot_num++;
       t = t + ts;
     }
