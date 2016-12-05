@@ -338,7 +338,7 @@ int main(int argc, char* argv[])
   int transform; // 0 for tranlation, 1 for rotation
 
   // TRANSLATION
-  //transform = 0;
+  transform = 0;
 
   // initial velocity vector for 3D translation
   XYZ v, v_0;
@@ -361,7 +361,7 @@ int main(int argc, char* argv[])
 
 
   // ROTATION
-  transform = 1;
+  //transform = 1;
  
   // alpha(t) = alpha[0]+ alpha[1]*t + alpha[2]t^2
   double alpha[3] = {0, 0, 0}; //angular acceleration [rad/s^2]
@@ -378,7 +378,7 @@ int main(int argc, char* argv[])
   L1.z = 1;
 
   double t = 0.0; //current time [s]
-  double ts = 2.0; //length of time step [s]
+  double ts = 1.0; //length of time step [s]
   double end_t = 4.0; //end time [s]
   int shot_num = 0; //current time step
 
@@ -388,9 +388,9 @@ int main(int argc, char* argv[])
   //base output file name 
   std::string output_file = "moved.h5m";
 
-  moab::Range surfs;
+  moab::Range surfs, tmp_surfs;
   moab::Range mv;
-  moab::Range::iterator its, itt;
+  moab::Range::iterator its, itt, itv;
 
   while (t <= end_t)
     {
@@ -402,12 +402,20 @@ int main(int argc, char* argv[])
           std::cout << "obb root eh" << obb_root << std::endl;
 
           //delete obb tree
-          obbTree->delete_tree(obb_root);
+          rval = obbTree->delete_tree(obb_root);
+          //std::cout << "delete tree rval " << rval << std::endl;
 
           //get verts of moving vol and add to range
           mv.clear();
           get_verts(mbi, *its, mv);
           std::cout << "num moving verts " << mv.size() << std::endl;
+
+          //get surfs FIX THIS!!!!
+          rval = mbi->get_child_meshsets(*its, tmp_surfs);
+          for (itv = tmp_surfs.begin(); itv != tmp_surfs.end(); ++itv)
+            {
+              surfs.insert(*itv);
+            }
           
           for (itt = mv.begin(); itt != mv.end(); ++itt)
             {
@@ -463,8 +471,9 @@ int main(int argc, char* argv[])
       //if((DAG->have_obb_tree()))
         // std::cout << "obb already exists" << std::endl; 
      
-      DAG->build_obbs(surfs, vols);
-
+      rval = DAG->build_obbs(surfs, vols);
+      if (moab::MB_SUCCESS != rval) 
+         std::cout << "problem with build obbs" << rval << std::endl;
 //      rval = mbi->write_mesh( (std::to_string(shot_num)+output_file).c_str());
       shot_num++;
       t = t + ts;
