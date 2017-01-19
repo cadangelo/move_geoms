@@ -35,6 +35,8 @@ moab::Tag obb_tree_tag;
 
 moab::DagMC *DAG;
 
+char implComplName[NAME_TAG_SIZE];
+
 struct XYZ{
   double x;
   double y;
@@ -300,11 +302,14 @@ moab::ErrorCode setup(moab::Core *mbi, char* filename)
   rval = DAG->load_existing_contents();
   CHECK_ERR(rval);
 
-  rval = DAG->setup_obbs();
+  rval = DAG->init_OBBTree();
   CHECK_ERR(rval);
+
+//  rval = DAG->setup_obbs();
+//  CHECK_ERR(rval);
  
-  rval = DAG->setup_indices();
-  CHECK_ERR(rval);
+//  rval = DAG->setup_indices();
+//  CHECK_ERR(rval);
 
 }
 
@@ -314,12 +319,14 @@ int main(int argc, char* argv[])
  
   moab::Core *mbi = new moab::Core();
 
+  memset( implComplName, 0, NAME_TAG_SIZE );
+  strcpy( implComplName , "impl_complement" );
 
   char* filename = argv[1];
 
   rval = setup(mbi, filename);
 
-  moab::OrientedBoxTreeTool *obbTree = new moab::OrientedBoxTreeTool(mbi, "OBB", true);
+  moab::OrientedBoxTreeTool *obbTree = new moab::OrientedBoxTreeTool(mbi, "OBB", false);
 
   // get all volumes
   int num_cells = DAG->num_entities( 3 );
@@ -390,7 +397,7 @@ int main(int argc, char* argv[])
 
   moab::Range surfs, tmp_surfs;
   moab::Range mv;
-  moab::Range::iterator its, itt, itv;
+  moab::Range::iterator its, itt, itv, itx, itz;
 
   while (t <= end_t)
     {
@@ -400,23 +407,30 @@ int main(int argc, char* argv[])
           moab::EntityHandle obb_root;
           DAG->get_root(*its, obb_root);
           std::cout << "obb root eh" << obb_root << std::endl;
+          //build new obb trees for moving vols
+          //if((DAG->have_myobb_tree(obb_root)))
+          //   std::cout << DAG->have_myobb_tree(obb_root) << std::endl; 
 
           //delete obb tree
           rval = obbTree->delete_tree(obb_root);
-          //std::cout << "delete tree rval " << rval << std::endl;
+          std::cout << "delete tree rval " << rval << std::endl;
 
+
+          //if((DAG->have_myobb_tree(obb_root)))
+            // std::cout << "obb already exists" << std::endl; 
           //get verts of moving vol and add to range
           mv.clear();
           get_verts(mbi, *its, mv);
           std::cout << "num moving verts " << mv.size() << std::endl;
 
           //get surfs FIX THIS!!!!
+       
           rval = mbi->get_child_meshsets(*its, tmp_surfs);
           for (itv = tmp_surfs.begin(); itv != tmp_surfs.end(); ++itv)
             {
               surfs.insert(*itv);
             }
-          
+         
           for (itt = mv.begin(); itt != mv.end(); ++itt)
             {
               if(t == 0)
@@ -429,8 +443,9 @@ int main(int argc, char* argv[])
                   p.y = xyz[1];
                   p.z = xyz[2];
            
+  //                std::cout << p.x << " " << p.y << " " << p.z  << std::endl;          
                   //map original position
-                  position[*its] = p;
+                  position[*itt] = p;
                 
                 }
            
@@ -438,7 +453,7 @@ int main(int argc, char* argv[])
                 {
            
                   //get original position
-                  p_0 = position.find(*itt)->second;
+                  p_0 = position[*itt];
            
                   //if translation
                   if (transform == 0)
@@ -459,7 +474,9 @@ int main(int argc, char* argv[])
                   xyz_new[0] = p_new.x;
                   xyz_new[1] = p_new.y;
                   xyz_new[2] = p_new.z;
-           
+//                  std::cout << xyz_new[0] << " " << xyz_new[1] << " " << xyz_new[2] << std::endl;          
+//                  std::cout << p_new.x << " " << p_new.y << " " << p_new.z  << std::endl;          
+ 
                   rval = mbi->set_coords(&(*itt), 1, xyz_new);
                   CHECK_ERR(rval);
                 }
@@ -467,16 +484,72 @@ int main(int argc, char* argv[])
             }    
         }
 
-      //build new obb trees for moving vols
-      //if((DAG->have_obb_tree()))
-        // std::cout << "obb already exists" << std::endl; 
-     
+      //delete this DAG instance and create a new one
+  //    delete DAG;
+ //     DAG = new moab::DagMC(mbi);
+ //     rval = DAG->load_existing_contents();
+      //rval = DAG->init_OBBTree();
+      //std::cout << "init obb tree rval " << rval << std::endl;
+
+      //find impl compl and delete it
+      //rval = DAG->get_impl_compl();
+      //CHECK_ERR(rval);
+      //std::cout << "get ic rval" << rval << std::endl;
+         
+      if( !(DAG->have_impl_compl()))
+        {
+          std::cout << "impl compl not found or there are too many" <<  rval << std::endl;
+        }
+      else
+        {
+          
+          moab::Range impl_compl;
+          moab::Range::iterator it;
+          const void* const tagdata[] = {implComplName};
+//          const void* const tagdata[] = {"impl_complement"};
+          rval = mbi->get_entities_by_type_and_tag( 0, moab::MBENTITYSET,
+                                                    &name_tag, tagdata, 1,
+                                                    impl_compl );
+
+          CHECK_ERR(rval);
+          //get all IC's child surfaces
+          moab::Range child_surfs;
+          rval = mbi->get_child_meshsets( *impl_compl.begin(), child_surfs );
+          CHECK_ERR(rval);
+          std::cout << "ic's surfs b4 delete " << child_surfs.size() << std::endl;
+         
+          for(itx = child_surfs.begin(); itx != child_surfs.end(); ++itx)
+            {
+              mbi->remove_parent_child(*impl_compl.begin(), *itx);
+            }
+         std::cout << "ic's surfs after delete " << child_surfs.size() << std::endl;
+/*
+
+*/
+//          vols.insert(*impl_compl.begin());
+          impl_compl.clear();
+
+          rval = mbi->delete_entities(impl_compl);
+          CHECK_ERR(rval);
+
+          rval = DAG->setup_impl_compl();
+          std::cout << "set up impl " << rval << std::endl;
+          CHECK_ERR(rval);
+
+          impl_compl = DAG->return_ic();
+
+        }
+
+      std::cout << " surfs " << surfs.size() <<  std::endl;
+      std::cout << " vols " << vols.size() <<  std::endl;
+
       rval = DAG->build_obbs(surfs, vols);
       if (moab::MB_SUCCESS != rval) 
-         std::cout << "problem with build obbs" << rval << std::endl;
-//      rval = mbi->write_mesh( (std::to_string(shot_num)+output_file).c_str());
+         std::cout << "problem with build obbs " << rval << std::endl;
+      rval = mbi->write_mesh( (std::to_string(shot_num)+output_file).c_str());
       shot_num++;
       t = t + ts;
+      
     }
   
   delete DAG;
