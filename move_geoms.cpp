@@ -30,6 +30,7 @@ moab::Tag name_tag;
 moab::Tag obj_name_tag;
 moab::Tag dim_tag, id_tag;
 moab::Tag move_tag;
+moab::Tag sense_tag;
 moab::Tag obb_tag;
 moab::Tag obb_tree_tag;
 
@@ -77,6 +78,9 @@ moab::ErrorCode get_all_handles(moab::Core *mbi)
 			      moab::MB_TAG_SPARSE|moab::MB_TAG_CREAT );
 
   CHECK_ERR(rval);
+
+  rval = mbi->tag_get_handle("GEOM_SENSE_2", 2, moab::MB_TYPE_HANDLE,
+                             sense_tag, moab::MB_TAG_SPARSE|moab::MB_TAG_CREAT );
 
 /*
   rval = mbi->tag_get_handle( MB_OBB_TREE_TAG_NAME, 1, moab::MB_TYPE_HANDLE, 
@@ -313,14 +317,77 @@ moab::ErrorCode setup(moab::Core *mbi, char* filename)
 
 }
 
+moab::ErrorCode delete_implicit_compliment(moab::Interface  *mbi)
+{
+  moab::ErrorCode rval;
+  memset( implComplName, 0, NAME_TAG_SIZE );
+  strcpy( implComplName , "impl_complement" );
+  moab::Range impl_compl;
+  moab::Range::iterator itx;
+  moab::EntityHandle sense_data[2] = {0,0};
+
+  if( !(DAG->have_impl_compl()))
+    {
+      std::cout << "impl compl not found or there are too many" <<  rval << std::endl;
+    }
+  else
+    {
+      
+      const void* const tagdata[] = {implComplName};
+      rval = mbi->get_entities_by_type_and_tag( 0, moab::MBENTITYSET,
+                                                &name_tag, tagdata, 1,
+                                                impl_compl );
+
+      CHECK_ERR(rval);
+      //get all IC's child surfaces
+      moab::Range child_surfs;
+      rval = mbi->get_child_meshsets( *impl_compl.begin(), child_surfs );
+      CHECK_ERR(rval);
+     
+      for(itx = child_surfs.begin(); itx != child_surfs.end(); ++itx)
+        {
+          //remove IC vol from IC surf sense tag
+          rval = mbi->tag_get_data( sense_tag, &(*itx), 1, sense_data );
+    
+
+                if(*impl_compl.begin()==sense_data[0])
+                  {
+                   std::cout << "IC eh: " << *impl_compl.begin() << std::endl;
+                   std::cout << "ic is sense 0: " << sense_data[0] << std::endl;
+                   sense_data[0] = 0;
+                   std::cout << "ic is sense 0: " << sense_data[0] << std::endl;
+         
+                  }
+                if(*impl_compl.begin()==sense_data[1])
+                  {
+                    std::cout << "IC eh: " << *impl_compl.begin() << std::endl;
+                    std::cout << "ic is sense 1: " << sense_data[1] << std::endl;
+                    sense_data[1] = 0;
+                    std::cout << "ic is sense 1: " << sense_data[1] << std::endl;
+                  }
+
+          //remove parent child link
+          rval = mbi->remove_parent_child(*impl_compl.begin(), *itx);
+          CHECK_ERR(rval);
+          
+        }
+
+//      impl_compl.clear();
+
+      rval = mbi->delete_entities(impl_compl);
+      CHECK_ERR(rval);
+
+
+    }
+
+}
+
 int main(int argc, char* argv[]) 
 {
   moab::ErrorCode rval; 
  
   moab::Core *mbi = new moab::Core();
 
-  memset( implComplName, 0, NAME_TAG_SIZE );
-  strcpy( implComplName , "impl_complement" );
 
   char* filename = argv[1];
 
@@ -399,6 +466,8 @@ int main(int argc, char* argv[])
   moab::Range mv;
   moab::Range::iterator its, itt, itv, itx, itz;
 
+           rval = delete_implicit_compliment(mbi);
+           CHECK_ERR(rval);
   while (t <= end_t)
     {
       for (its = vols.begin(); its != vols.end(); ++its)
@@ -407,30 +476,23 @@ int main(int argc, char* argv[])
           moab::EntityHandle obb_root;
           DAG->get_root(*its, obb_root);
           std::cout << "obb root eh" << obb_root << std::endl;
-          //build new obb trees for moving vols
-          //if((DAG->have_myobb_tree(obb_root)))
-          //   std::cout << DAG->have_myobb_tree(obb_root) << std::endl; 
 
           //delete obb tree
           rval = obbTree->delete_tree(obb_root);
           std::cout << "delete tree rval " << rval << std::endl;
 
-
-          //if((DAG->have_myobb_tree(obb_root)))
-            // std::cout << "obb already exists" << std::endl; 
-          //get verts of moving vol and add to range
-          mv.clear();
-          get_verts(mbi, *its, mv);
-          std::cout << "num moving verts " << mv.size() << std::endl;
-
-          //get surfs FIX THIS!!!!
-       
+          //get this vol's surfs and add to total surf range
           rval = mbi->get_child_meshsets(*its, tmp_surfs);
           for (itv = tmp_surfs.begin(); itv != tmp_surfs.end(); ++itv)
             {
               surfs.insert(*itv);
             }
-         
+
+          //get verts of moving vol and add to range
+          mv.clear();
+          get_verts(mbi, *its, mv);
+          std::cout << "num moving verts " << mv.size() << std::endl;
+
           for (itt = mv.begin(); itt != mv.end(); ++itt)
             {
               if(t == 0)
@@ -443,7 +505,6 @@ int main(int argc, char* argv[])
                   p.y = xyz[1];
                   p.z = xyz[2];
            
-  //                std::cout << p.x << " " << p.y << " " << p.z  << std::endl;          
                   //map original position
                   position[*itt] = p;
                 
@@ -474,8 +535,6 @@ int main(int argc, char* argv[])
                   xyz_new[0] = p_new.x;
                   xyz_new[1] = p_new.y;
                   xyz_new[2] = p_new.z;
-//                  std::cout << xyz_new[0] << " " << xyz_new[1] << " " << xyz_new[2] << std::endl;          
-//                  std::cout << p_new.x << " " << p_new.y << " " << p_new.z  << std::endl;          
  
                   rval = mbi->set_coords(&(*itt), 1, xyz_new);
                   CHECK_ERR(rval);
@@ -484,61 +543,15 @@ int main(int argc, char* argv[])
             }    
         }
 
-      //delete this DAG instance and create a new one
-  //    delete DAG;
- //     DAG = new moab::DagMC(mbi);
- //     rval = DAG->load_existing_contents();
-      //rval = DAG->init_OBBTree();
-      //std::cout << "init obb tree rval " << rval << std::endl;
+           rval = delete_implicit_compliment(mbi);
+           CHECK_ERR(rval);
 
-      //find impl compl and delete it
-      //rval = DAG->get_impl_compl();
-      //CHECK_ERR(rval);
-      //std::cout << "get ic rval" << rval << std::endl;
-         
-      if( !(DAG->have_impl_compl()))
-        {
-          std::cout << "impl compl not found or there are too many" <<  rval << std::endl;
-        }
-      else
-        {
-          
-          moab::Range impl_compl;
-          moab::Range::iterator it;
-          const void* const tagdata[] = {implComplName};
-//          const void* const tagdata[] = {"impl_complement"};
-          rval = mbi->get_entities_by_type_and_tag( 0, moab::MBENTITYSET,
-                                                    &name_tag, tagdata, 1,
-                                                    impl_compl );
+           rval = DAG->setup_impl_compl();
+           std::cout << "set up impl " << rval << std::endl;
+           CHECK_ERR(rval);
 
-          CHECK_ERR(rval);
-          //get all IC's child surfaces
-          moab::Range child_surfs;
-          rval = mbi->get_child_meshsets( *impl_compl.begin(), child_surfs );
-          CHECK_ERR(rval);
-          std::cout << "ic's surfs b4 delete " << child_surfs.size() << std::endl;
-         
-          for(itx = child_surfs.begin(); itx != child_surfs.end(); ++itx)
-            {
-              mbi->remove_parent_child(*impl_compl.begin(), *itx);
-            }
-         std::cout << "ic's surfs after delete " << child_surfs.size() << std::endl;
-/*
-
-*/
-//          vols.insert(*impl_compl.begin());
-          impl_compl.clear();
-
-          rval = mbi->delete_entities(impl_compl);
-          CHECK_ERR(rval);
-
-          rval = DAG->setup_impl_compl();
-          std::cout << "set up impl " << rval << std::endl;
-          CHECK_ERR(rval);
-
-          impl_compl = DAG->return_ic();
-
-        }
+//          impl_compl = DAG->return_ic();
+//          }   
 
       std::cout << " surfs " << surfs.size() <<  std::endl;
       std::cout << " vols " << vols.size() <<  std::endl;
