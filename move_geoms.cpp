@@ -8,6 +8,7 @@
 using moab::DagMC;
 
 #include <string>
+#include <fstream>
 #include <math.h>
 #include <cmath>
 #include <stdlib.h>
@@ -35,6 +36,8 @@ moab::Tag obb_tag;
 moab::Tag obb_tree_tag;
 
 moab::DagMC *DAG;
+
+moab::Core *mbi = new moab::Core;
 
 char implComplName[NAME_TAG_SIZE];
 
@@ -317,7 +320,9 @@ moab::ErrorCode setup(moab::Core *mbi, char* filename)
 
 }
 
-moab::ErrorCode delete_implicit_compliment(moab::Interface  *mbi)
+//moab::ErrorCode delete_implicit_compliment(moab::Range surfs)
+//moab::ErrorCode delete_implicit_compliment(moab::Interface  *mbi)
+moab::ErrorCode delete_implicit_compliment()
 {
   moab::ErrorCode rval;
   memset( implComplName, 0, NAME_TAG_SIZE );
@@ -343,8 +348,10 @@ moab::ErrorCode delete_implicit_compliment(moab::Interface  *mbi)
       moab::Range child_surfs;
       rval = mbi->get_child_meshsets( *impl_compl.begin(), child_surfs );
       CHECK_ERR(rval);
-     
+    
+      std::cout << "surfs in IC " << child_surfs.size() << std::endl; 
       for(itx = child_surfs.begin(); itx != child_surfs.end(); ++itx)
+//      for(itx = surfs.begin(); itx != surfs.end(); ++itx)
         {
           //remove IC vol from IC surf sense tag
           rval = mbi->tag_get_data( sense_tag, &(*itx), 1, sense_data );
@@ -366,32 +373,170 @@ moab::ErrorCode delete_implicit_compliment(moab::Interface  *mbi)
                     std::cout << "ic is sense 1: " << sense_data[1] << std::endl;
                   }
 
+           rval = mbi->tag_set_data( sense_tag, &(*itx), 1, sense_data );
+
           //remove parent child link
           rval = mbi->remove_parent_child(*impl_compl.begin(), *itx);
           CHECK_ERR(rval);
           
         }
 
-//      impl_compl.clear();
+      impl_compl.clear();
+      std::cout << "surfs in IC " << child_surfs.size() << std::endl; 
 
       rval = mbi->delete_entities(impl_compl);
       CHECK_ERR(rval);
 
 
     }
+  
+  return moab::MB_SUCCESS;
 
+}
+
+void tokenize( const std::string& str, 
+               std::vector<std::string>& tokens,
+               const char* delimiters)
+{
+  tokens.clear();
+
+  std::string::size_type next_token_end, next_token_start =
+                         str.find_first_not_of( delimiters, 0);
+
+  while ( std::string::npos != next_token_start )
+    {
+      next_token_end = str.find_first_of( delimiters, next_token_start );
+      if ( std::string::npos == next_token_end )
+        {
+	  tokens.push_back(str.substr(next_token_start));
+          next_token_start = std::string::npos;
+        }
+      else
+        {
+          tokens.push_back( str.substr( next_token_start, next_token_end -
+                                        next_token_start ) );
+          next_token_start = str.find_first_not_of( delimiters, next_token_end );
+        }
+    }
+}
+
+void process_input(char* tfilename, 
+                   XYZ v_0, XYZ b, XYZ c, XYZ d, 
+                   XYZ L0, XYZ L1, XYZ omega_0, XYZ alpha,
+                   double ts, double end_t, int rotation, int translation)
+{
+  std::ifstream transform_input(tfilename);
+  std::string line;
+  const char* delimiters = " "; 
+  const char* velocity_start_token = "v"; 
+  const char* a0_start_token = "b";
+  const char* a1_start_token = "c";
+  const char* a2_start_token = "d";
+  const char* L0_start_token = "i";
+  const char* L1_start_token = "j";
+  const char* ang_velocity_start_token = "w";
+  const char* ang_acc_start_token = "a";
+  const char* time_step_start_token = "s";
+  const char* end_time_start_token = "e";
+  const char* rotation_start_token = "r";
+  const char* translation_start_token = "t";
+
+  if (transform_input.is_open())
+   {
+      while(std::getline(transform_input, line))
+        {
+          // Skip blank lines in file
+	  if (line.length() == 0 ) continue;
+
+          // Tokenize the line
+          std::vector<std::string> tokens;
+          tokenize(line, tokens, delimiters);
+          if (tokens.empty()) continue ; 
+          
+          // Initial velocity
+          if( tokens[0].compare(velocity_start_token ) == 0 && tokens.size() > 1)
+            {
+              v_0.x = atof(tokens[1].c_str());
+              v_0.y = atof(tokens[2].c_str());
+              v_0.z = atof(tokens[3].c_str());
+            }
+          // Acceleration 
+          // a(t) = b + ct + dt^2
+          if( tokens[0].compare(a0_start_token ) == 0 && tokens.size() > 1)
+            {
+              b.x = atof(tokens[1].c_str());
+              b.y = atof(tokens[2].c_str());
+              b.z = atof(tokens[3].c_str());
+            }
+          if( tokens[0].compare(a1_start_token ) == 0 && tokens.size() > 1)
+            {
+              c.x = atof(tokens[1].c_str());
+              c.y = atof(tokens[2].c_str());
+              c.z = atof(tokens[3].c_str());
+            }
+          if( tokens[0].compare(a2_start_token ) == 0 && tokens.size() > 1)
+            {
+              d.x = atof(tokens[1].c_str());
+              d.y = atof(tokens[2].c_str());
+              d.z = atof(tokens[3].c_str());
+            }
+          // Two points that define line points rotate about 
+          if( tokens[0].compare(L0_start_token ) == 0 && tokens.size() > 1)
+            {
+              L0.x = atof(tokens[1].c_str());
+              L0.y = atof(tokens[2].c_str());
+              L0.z = atof(tokens[3].c_str());
+            }
+          if( tokens[0].compare(L1_start_token ) == 0 && tokens.size() > 1)
+            {
+              L1.x = atof(tokens[1].c_str());
+              L1.y = atof(tokens[2].c_str());
+              L1.z = atof(tokens[3].c_str());
+            }
+          //  Angular Acceleration         
+          // alpha(t) = alpha[0]+ alpha[1]*t + alpha[2]t^2
+          if( tokens[0].compare(ang_acc_start_token ) == 0 && tokens.size() > 1)
+            {
+              alpha[0] = atof(tokens[1].c_str());
+              alpha[1] = atof(tokens[2].c_str());
+              alpha[2] = atof(tokens[3].c_str());
+            }
+          if( tokens[0].compare(ang_velocity_start_token ) == 0 && tokens.size() > 1)
+            {
+              omega_0 = atof(tokens[1].c_str());
+            }
+          if( tokens[0].compare(time_step_start_token ) == 0 && tokens.size() > 1)
+            {
+              ts = atof(tokens[1].c_str();
+            }
+          if( tokens[0].compare(end_time_start_token ) == 0 && tokens.size() > 1)
+            {
+              end_t = atof(tokens[1].c_str();
+            }
+          if( tokens[0].compare(rotation_start_token ) == 0 && tokens.size() > 1)
+            {
+              rotation = stoi(tokens[1].c_str());
+            }
+          if( tokens[0].compare(translation_start_token ) == 0 && tokens.size() > 1)
+            {
+              translation = stoi(tokens[1].c_str());
+            }
+        }
+   }
 }
 
 int main(int argc, char* argv[]) 
 {
   moab::ErrorCode rval; 
  
-  moab::Core *mbi = new moab::Core();
+//  moab::Core *mbi = new moab::Core();
 
 
-  char* filename = argv[1];
+  char* gfilename = argv[1];
+  char* tfilename = argv[2];
 
-  rval = setup(mbi, filename);
+  rval = setup(mbi, gfilename);
+
 
   moab::OrientedBoxTreeTool *obbTree = new moab::OrientedBoxTreeTool(mbi, "OBB", false);
 
@@ -404,56 +549,25 @@ int main(int argc, char* argv[])
   vols = get_tagged_vols(mbi, num_cells, "moving");
   std::cout << "num moving vols " << vols.size() << std::endl;
 
+  //process input function
+  XYZ v, v_0;
+  XYZ b, c, d;
+  XYZ L0, L1;
+  double omega_0;
+  double alpha[3];
+  double ts; //length of time step [s]
+  double end_t; //end time [s]
+  int translation;
+  int rotation; 
+  process_input(tfilename, v_0, b, c, d, L0, L1, omega_0, alpha, ts, end_t, rotation, translation);
+
 
   //Inital point, updated point
   XYZ p_0, p, p_new;
   double xyz[3], xyz_new[3];
 
-  int transform; // 0 for tranlation, 1 for rotation
-
-  // TRANSLATION
-  transform = 0;
-
-  // initial velocity vector for 3D translation
-  XYZ v, v_0;
-  v_0.x = 100;
-  v_0.y = 0;
-  v_0.z = 0;
-
-  // acceleration vector for 3D translation
-  // a(t) = b + ct + dt^2
-  XYZ b, c, d;
-  b.x = 0;
-  c.x = 0;
-  d.x = 0;
-  b.y = 0;
-  c.y = 0;
-  d.y = 0;
-  b.z = 0;
-  c.z = 0;
-  d.z = 0;
-
-
-  // ROTATION
-  //transform = 1;
- 
-  // alpha(t) = alpha[0]+ alpha[1]*t + alpha[2]t^2
-  double alpha[3] = {0, 0, 0}; //angular acceleration [rad/s^2]
-  double omega, omega_0 = M_PI/2; //angular velocity [rad/s]
-  double theta; //displacement [rad]
-
-  // Two points that define line points rotate about 
-  XYZ L0, L1;
-  L0.x = 0;
-  L0.y = 250;
-  L0.z = 0;
-  L1.x = 0;
-  L1.y = 250;
-  L1.z = 1;
 
   double t = 0.0; //current time [s]
-  double ts = 1.0; //length of time step [s]
-  double end_t = 4.0; //end time [s]
   int shot_num = 0; //current time step
 
   // map of vertex eh to original position
@@ -466,21 +580,22 @@ int main(int argc, char* argv[])
   moab::Range mv;
   moab::Range::iterator its, itt, itv, itx, itz;
 
-           rval = delete_implicit_compliment(mbi);
-           CHECK_ERR(rval);
   while (t <= end_t)
     {
+      std::cout << "time step t= " << t << std::endl;
       for (its = vols.begin(); its != vols.end(); ++its)
         {
-          //get obb tree root node
-          moab::EntityHandle obb_root;
-          DAG->get_root(*its, obb_root);
-          std::cout << "obb root eh" << obb_root << std::endl;
-
-          //delete obb tree
-          rval = obbTree->delete_tree(obb_root);
-          std::cout << "delete tree rval " << rval << std::endl;
-
+          if(t != 0)
+            {
+               //get obb tree root node
+               moab::EntityHandle obb_root;
+               DAG->get_root(*its, obb_root);
+               std::cout << "obb root eh" << obb_root << std::endl;
+           
+               //delete obb tree
+               rval = obbTree->delete_tree(obb_root);
+               std::cout << "delete tree rval " << rval << std::endl;
+            }
           //get this vol's surfs and add to total surf range
           rval = mbi->get_child_meshsets(*its, tmp_surfs);
           for (itv = tmp_surfs.begin(); itv != tmp_surfs.end(); ++itv)
@@ -517,7 +632,7 @@ int main(int argc, char* argv[])
                   p_0 = position[*itt];
            
                   //if translation
-                  if (transform == 0)
+                  if (translation == 1)
                     {
                        p_new.x = p_0.x + v_0.x*t + (1/2)*b.x*pow(t,2) + (1/6)*c.x*pow(t,3) + (1/12)*d.x*pow(t,4);
                        p_new.y = p_0.y + v_0.y*t + (1/2)*b.y*pow(t,2) + (1/6)*c.y*pow(t,3) + (1/12)*d.y*pow(t,4);
@@ -525,9 +640,9 @@ int main(int argc, char* argv[])
                     }
                
                   //if rotation
-                  if (transform == 1)
+                  if (rotation == 1)
                     { 
-                      omega = omega_0 + alpha[0]*t + (1/2)*alpha[1]*pow(t,2) + (1/3)*alpha[2]*pow(t,3);
+                      double omega = omega_0 + alpha[0]*t + (1/2)*alpha[1]*pow(t,2) + (1/3)*alpha[2]*pow(t,3);
                       theta = omega*t;
                       p_new = rotate_point(p_0, theta, L0, L1);
                     }
@@ -542,24 +657,28 @@ int main(int argc, char* argv[])
 
             }    
         }
-
-           rval = delete_implicit_compliment(mbi);
+        
+      if( t != 0)
+        {
+           //rval = delete_implicit_compliment(surfs);
+           rval = delete_implicit_compliment();
+           std::cout << "delete IC rval " << rval << std::endl;
            CHECK_ERR(rval);
-
+  
            rval = DAG->setup_impl_compl();
            std::cout << "set up impl " << rval << std::endl;
            CHECK_ERR(rval);
-
-//          impl_compl = DAG->return_ic();
-//          }   
-
-      std::cout << " surfs " << surfs.size() <<  std::endl;
-      std::cout << " vols " << vols.size() <<  std::endl;
-
-      rval = DAG->build_obbs(surfs, vols);
-      if (moab::MB_SUCCESS != rval) 
-         std::cout << "problem with build obbs " << rval << std::endl;
-      rval = mbi->write_mesh( (std::to_string(shot_num)+output_file).c_str());
+       
+//              impl_compl = DAG->return_ic();
+       
+           std::cout << " surfs " << surfs.size() <<  std::endl;
+           std::cout << " vols " << vols.size() <<  std::endl;
+       
+           rval = DAG->build_obbs(surfs, vols);
+           if (moab::MB_SUCCESS != rval) 
+              std::cout << "problem with build obbs " << rval << std::endl;
+        }
+//      rval = mbi->write_mesh( (std::to_string(shot_num)+output_file).c_str());
       shot_num++;
       t = t + ts;
       
