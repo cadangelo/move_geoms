@@ -172,6 +172,92 @@ XYZ rotate_point(XYZ P, double theta, XYZ L1, XYZ L2)
    // return rotated point
    return(q1);
 }
+//std::map<moab::EntityHandle, std::vector<std::string>> get_property_assignments(std::string property,
+//                                                                                int dim, 
+//                                                                                std::string tag_delims)
+//{
+//  moab::ErrorCode rval;
+//  // get moving tag from parse_properties
+////  const char *tag_delims = ":";
+//  std::vector<std::string> group_name;
+//  std::map<std::string, std::string> group_name_synonyms;
+//
+//  group_name.push_back("moving");
+//
+//  rval = DAG->parse_properties(group_name, group_name_synonyms, tag_delims.c_str());
+//  if (moab::MB_SUCCESS != rval) 
+//    {
+//      std::cerr << "DAGMC failed to parse metadata properties" <<  std::endl;
+//      exit(EXIT_FAILURE);
+//    }
+//
+//  // get initial sizes
+//  int num_entities = DAG->num_entities( dim );
+//
+//
+//}
+moab::ErrorCode new_get_tagged_entities(moab::Core *mbi, int total_cells, 
+                                    std::string tag_name, 
+                                    moab::Range &tagged_vols,
+                                    moab::Range &tagged_surfs,
+                                    moab::Range &tagged_verts)//,
+//                                    moab::Range &tagged_vert_sets)
+{
+  moab::ErrorCode rval;
+
+  // get moving tag from parse_properties
+  //const char *tag_delims = ":";
+  std::string tag_delims = ":";
+  std::vector<std::string> group_name;
+  std::map<std::string, std::string> group_name_synonyms;
+
+  group_name.push_back(tag_name);
+
+  rval = DAG->parse_properties(group_name, group_name_synonyms, tag_delims.c_str());
+  if (moab::MB_SUCCESS != rval) 
+    {
+      std::cerr << "DAGMC failed to parse metadata properties" <<  std::endl;
+      exit(EXIT_FAILURE);
+    }
+
+  // get desired tagged entities
+  moab::EntityHandle tagged_meshset;
+  moab::Range surf_set, vert_set;
+  //moab::Range tagged_vols, tagged_surfs, tagged_verts;
+  int num_verts;
+  moab::Range::iterator it, itr;
+
+  surf_set.clear();
+  vert_set.clear();
+
+  rval = mbi->create_meshset(moab::MESHSET_SET, tagged_meshset);
+  //CHECK_ERR(rval);
+
+  for( int i = 1; i <= total_cells; ++i ) 
+    {  
+      moab::EntityHandle vol = DAG->entity_by_index( 3, i );
+      if( DAG->has_prop( vol, tag_name))
+        { 
+          tagged_vols.insert(vol);
+
+          rval = mbi->get_child_meshsets(vol, surf_set);
+          CHECK_ERR(rval);
+          for (it = surf_set.begin(); it != surf_set.end(); it++)
+            {
+              tagged_surfs.insert(*it);
+              rval =  mbi->get_entities_by_type(*it, moab::MBVERTEX, vert_set);
+              CHECK_ERR(rval);
+              for (itr = vert_set.begin(); itr != vert_set.end(); itr++)
+                {
+                  tagged_verts.insert(*itr);
+                }
+            }  
+        }
+          
+    }
+
+  return moab::MB_SUCCESS;
+}
 
 moab::Range get_tagged_entities(moab::Core *mbi, int total_cells, std::string tag_name, int dim)
 {
@@ -183,7 +269,7 @@ moab::Range get_tagged_entities(moab::Core *mbi, int total_cells, std::string ta
 
   group_name.push_back(tag_name);
 
-  rval = DAG->parse_properties(group_name, group_name_synonyms);
+  rval = DAG->parse_properties(group_name, group_name_synonyms );
   if (moab::MB_SUCCESS != rval) 
     {
       std::cerr << "DAGMC failed to parse metadata properties" <<  std::endl;
@@ -312,87 +398,70 @@ moab::ErrorCode setup(moab::Core *mbi, char* filename)
   rval = DAG->init_OBBTree();
   CHECK_ERR(rval);
 
-//  rval = DAG->setup_obbs();
-//  CHECK_ERR(rval);
- 
-//  rval = DAG->setup_indices();
-//  CHECK_ERR(rval);
-
 }
 
-//moab::ErrorCode delete_implicit_compliment(moab::Range surfs)
-//moab::ErrorCode delete_implicit_compliment(moab::Interface  *mbi)
-moab::ErrorCode delete_implicit_compliment()
-{
-  moab::ErrorCode rval;
-  memset( implComplName, 0, NAME_TAG_SIZE );
-  strcpy( implComplName , "impl_complement" );
-  moab::Range impl_compl;
-  moab::Range::iterator itx;
-  moab::EntityHandle sense_data[2] = {0,0};
-
-  if( !(DAG->have_impl_compl()))
-    {
-      std::cout << "impl compl not found or there are too many" <<  rval << std::endl;
-    }
-  else
-    {
-      
-      const void* const tagdata[] = {implComplName};
-      rval = mbi->get_entities_by_type_and_tag( 0, moab::MBENTITYSET,
-                                                &name_tag, tagdata, 1,
-                                                impl_compl );
-
-      CHECK_ERR(rval);
-      //get all IC's child surfaces
-      moab::Range child_surfs;
-      rval = mbi->get_child_meshsets( *impl_compl.begin(), child_surfs );
-      CHECK_ERR(rval);
-    
-      std::cout << "surfs in IC " << child_surfs.size() << std::endl; 
-      for(itx = child_surfs.begin(); itx != child_surfs.end(); ++itx)
-//      for(itx = surfs.begin(); itx != surfs.end(); ++itx)
-        {
-          //remove IC vol from IC surf sense tag
-          rval = mbi->tag_get_data( sense_tag, &(*itx), 1, sense_data );
-    
-
-                if(*impl_compl.begin()==sense_data[0])
-                  {
-                   std::cout << "IC eh: " << *impl_compl.begin() << std::endl;
-                   std::cout << "ic is sense 0: " << sense_data[0] << std::endl;
-                   sense_data[0] = 0;
-                   std::cout << "ic is sense 0: " << sense_data[0] << std::endl;
-         
-                  }
-                if(*impl_compl.begin()==sense_data[1])
-                  {
-                    std::cout << "IC eh: " << *impl_compl.begin() << std::endl;
-                    std::cout << "ic is sense 1: " << sense_data[1] << std::endl;
-                    sense_data[1] = 0;
-                    std::cout << "ic is sense 1: " << sense_data[1] << std::endl;
-                  }
-
-           rval = mbi->tag_set_data( sense_tag, &(*itx), 1, sense_data );
-
-          //remove parent child link
-          rval = mbi->remove_parent_child(*impl_compl.begin(), *itx);
-          CHECK_ERR(rval);
-          
-        }
-
-      impl_compl.clear();
-      std::cout << "surfs in IC " << child_surfs.size() << std::endl; 
-
-      rval = mbi->delete_entities(impl_compl);
-      CHECK_ERR(rval);
-
-
-    }
-  
-  return moab::MB_SUCCESS;
-
-}
+//moab::ErrorCode delete_implicit_compliment()
+//{
+//  moab::ErrorCode rval;
+//  memset( implComplName, 0, NAME_TAG_SIZE );
+//  strcpy( implComplName , "impl_complement" );
+//  moab::Range impl_compl;
+//  moab::Range::iterator itx;
+//  moab::EntityHandle sense_data[2] = {0,0};
+//
+//  if( !(DAG->have_impl_compl()))
+//    {
+//      std::cout << "impl compl not found or there are too many" <<  rval << std::endl;
+//    }
+//  else
+//    {
+//      
+//      const void* const tagdata[] = {implComplName};
+//      rval = mbi->get_entities_by_type_and_tag( 0, moab::MBENTITYSET,
+//                                                &name_tag, tagdata, 1,
+//                                                impl_compl );
+//
+//      CHECK_ERR(rval);
+//      //get all IC's child surfaces
+//      moab::Range child_surfs;
+//      rval = mbi->get_child_meshsets( *impl_compl.begin(), child_surfs );
+//      CHECK_ERR(rval);
+//    
+//      for(itx = child_surfs.begin(); itx != child_surfs.end(); ++itx)
+//        {
+//          //remove IC vol from IC surf sense tag
+//          rval = mbi->tag_get_data( sense_tag, &(*itx), 1, sense_data );
+//    
+//
+//                if(*impl_compl.begin()==sense_data[0])
+//                  {
+//                   sense_data[0] = 0;
+//         
+//                  }
+//                if(*impl_compl.begin()==sense_data[1])
+//                  {
+//                    sense_data[1] = 0;
+//                  }
+//
+//           rval = mbi->tag_set_data( sense_tag, &(*itx), 1, sense_data );
+//
+//          //remove parent child link
+//          rval = mbi->remove_parent_child(*impl_compl.begin(), *itx);
+//          CHECK_ERR(rval);
+//          
+//        }
+//
+//      impl_compl.clear();
+//
+//      rval = mbi->delete_entities(impl_compl);
+//      CHECK_ERR(rval);
+//
+//
+//    }
+//  
+//  return moab::MB_SUCCESS;
+//
+//}
 
 void tokenize( const std::string& str, 
                std::vector<std::string>& tokens,
@@ -421,9 +490,9 @@ void tokenize( const std::string& str,
 }
 
 void process_input(char* tfilename, 
-                   XYZ v_0, XYZ b, XYZ c, XYZ d, 
-                   XYZ L0, XYZ L1, XYZ omega_0, XYZ alpha,
-                   double ts, double end_t, int rotation, int translation)
+                   XYZ& v_0, XYZ& b, XYZ& c, XYZ& d, 
+                   XYZ& L0, XYZ& L1, double& omega_0, double alpha[3],
+                   double& ts, double& end_t, int& rotation, int& translation)
 {
   std::ifstream transform_input(tfilename);
   std::string line;
@@ -507,61 +576,87 @@ void process_input(char* tfilename,
             }
           if( tokens[0].compare(time_step_start_token ) == 0 && tokens.size() > 1)
             {
-              ts = atof(tokens[1].c_str();
+              ts = atof(tokens[1].c_str());
+              std::cout << "s " << ts << std::endl;
             }
           if( tokens[0].compare(end_time_start_token ) == 0 && tokens.size() > 1)
             {
-              end_t = atof(tokens[1].c_str();
+              end_t = atof(tokens[1].c_str());
+              std::cout << "e " << end_t << std::endl;
             }
           if( tokens[0].compare(rotation_start_token ) == 0 && tokens.size() > 1)
             {
-              rotation = stoi(tokens[1].c_str());
+              rotation = stoi(tokens[1]);
             }
           if( tokens[0].compare(translation_start_token ) == 0 && tokens.size() > 1)
             {
-              translation = stoi(tokens[1].c_str());
+              translation = stoi(tokens[1]);
             }
         }
    }
 }
 
+moab::ErrorCode get_orig_vert_position(moab::Range mv , std::map<moab::EntityHandle, XYZ> &orig_positions)
+{
+
+  moab::ErrorCode rval;
+  moab::Range::iterator itt;
+  double xyz[3];
+  XYZ p;
+  //get starting position of each moving vertex
+  for (itt = mv.begin(); itt != mv.end(); ++itt)
+    {
+      rval = mbi->get_coords(&(*itt), 1, xyz);
+      CHECK_ERR(rval);
+      
+      p.x = xyz[0];
+      p.y = xyz[1];
+      p.z = xyz[2];
+      
+      //keep original position of each vertex
+      orig_positions[*itt] = p;
+    }
+}
 int main(int argc, char* argv[]) 
 {
   moab::ErrorCode rval; 
  
-//  moab::Core *mbi = new moab::Core();
-
-
   char* gfilename = argv[1];
   char* tfilename = argv[2];
 
   rval = setup(mbi, gfilename);
 
-
-  moab::OrientedBoxTreeTool *obbTree = new moab::OrientedBoxTreeTool(mbi, "OBB", false);
-
-  // get all volumes
+  // get total number of volumes
   int num_cells = DAG->num_entities( 3 );
   std::cout << "num cells: " << num_cells << std::endl;
 
-  //get moving volumes
-  moab::Range vols;
-  vols = get_tagged_vols(mbi, num_cells, "moving");
+  //get moving volumes, surfs, and verts
+  moab::Range vols, surfs, mv;
+  std::map<moab::EntityHandle, XYZ> orig_positions;
+  rval = new_get_tagged_entities(mbi, num_cells, "moving", vols, surfs, mv);
   std::cout << "num moving vols " << vols.size() << std::endl;
+  std::cout << "num moving verts " << mv.size() << std::endl;
+
+  // map of vertex eh to original position
+  std::map<moab::EntityHandle, XYZ> position;
+  rval = get_orig_vert_position(mv, position);
 
   //process input function
   XYZ v, v_0;
   XYZ b, c, d;
   XYZ L0, L1;
   double omega_0;
-  double alpha[3];
+  double alpha[3] = {};
+  double theta;
   double ts; //length of time step [s]
   double end_t; //end time [s]
   int translation;
   int rotation; 
   process_input(tfilename, v_0, b, c, d, L0, L1, omega_0, alpha, ts, end_t, rotation, translation);
 
-
+  std::cout << "velocity " << v_0.x << " " << v_0.y << " " << v_0.z << std::endl;
+  std::cout << "alpha " << alpha[0] << " " << alpha[1] << " " << alpha[2] << std::endl;
+  
   //Inital point, updated point
   XYZ p_0, p, p_new;
   double xyz[3], xyz_new[3];
@@ -570,64 +665,21 @@ int main(int argc, char* argv[])
   double t = 0.0; //current time [s]
   int shot_num = 0; //current time step
 
-  // map of vertex eh to original position
-  std::map<moab::EntityHandle, XYZ> position;
  
   //base output file name 
   std::string output_file = "moved.h5m";
 
-  moab::Range surfs, tmp_surfs;
-  moab::Range mv;
   moab::Range::iterator its, itt, itv, itx, itz;
+  std::cout << "t step " << ts << std::endl;
+  std::cout << "end time " << end_t << std::endl;
 
   while (t <= end_t)
     {
       std::cout << "time step t= " << t << std::endl;
       for (its = vols.begin(); its != vols.end(); ++its)
         {
-          if(t != 0)
-            {
-               //get obb tree root node
-               moab::EntityHandle obb_root;
-               DAG->get_root(*its, obb_root);
-               std::cout << "obb root eh" << obb_root << std::endl;
-           
-               //delete obb tree
-               rval = obbTree->delete_tree(obb_root);
-               std::cout << "delete tree rval " << rval << std::endl;
-            }
-          //get this vol's surfs and add to total surf range
-          rval = mbi->get_child_meshsets(*its, tmp_surfs);
-          for (itv = tmp_surfs.begin(); itv != tmp_surfs.end(); ++itv)
-            {
-              surfs.insert(*itv);
-            }
-
-          //get verts of moving vol and add to range
-          mv.clear();
-          get_verts(mbi, *its, mv);
-          std::cout << "num moving verts " << mv.size() << std::endl;
-
           for (itt = mv.begin(); itt != mv.end(); ++itt)
             {
-              if(t == 0)
-                {
-                  //get starting position
-                  rval = mbi->get_coords(&(*itt), 1, xyz);
-                  CHECK_ERR(rval);
-               
-                  p.x = xyz[0];
-                  p.y = xyz[1];
-                  p.z = xyz[2];
-           
-                  //map original position
-                  position[*itt] = p;
-                
-                }
-           
-              else
-                {
-           
                   //get original position
                   p_0 = position[*itt];
            
@@ -646,43 +698,23 @@ int main(int argc, char* argv[])
                       theta = omega*t;
                       p_new = rotate_point(p_0, theta, L0, L1);
                     }
-           
+         
+                  //set the coordinates of the updated position  
                   xyz_new[0] = p_new.x;
                   xyz_new[1] = p_new.y;
                   xyz_new[2] = p_new.z;
- 
                   rval = mbi->set_coords(&(*itt), 1, xyz_new);
                   CHECK_ERR(rval);
-                }
 
             }    
         }
         
-      if( t != 0)
-        {
-           //rval = delete_implicit_compliment(surfs);
-           rval = delete_implicit_compliment();
-           std::cout << "delete IC rval " << rval << std::endl;
-           CHECK_ERR(rval);
-  
-           rval = DAG->setup_impl_compl();
-           std::cout << "set up impl " << rval << std::endl;
-           CHECK_ERR(rval);
-       
-//              impl_compl = DAG->return_ic();
-       
-           std::cout << " surfs " << surfs.size() <<  std::endl;
-           std::cout << " vols " << vols.size() <<  std::endl;
-       
-           rval = DAG->build_obbs(surfs, vols);
-           if (moab::MB_SUCCESS != rval) 
-              std::cout << "problem with build obbs " << rval << std::endl;
-        }
 //      rval = mbi->write_mesh( (std::to_string(shot_num)+output_file).c_str());
       shot_num++;
+      std::cout << "shot num " << shot_num << std::endl;
       t = t + ts;
       
-    }
+     }
   
   delete DAG;
   return 0;
