@@ -3,9 +3,9 @@
 #include "moab/Interface.hpp"
 #include "moab/Types.hpp"
 #include "MBTagConventions.hpp"
-
 #include "DagMC.hpp"
-using moab::DagMC;
+#include "dagmcmetadata.hpp"
+
 
 #include <string>
 #include <fstream>
@@ -36,6 +36,8 @@ moab::Tag obb_tag;
 moab::Tag obb_tree_tag;
 
 moab::DagMC *DAG;
+
+dagmcMetaData* DMD;
 
 moab::Core *mbi = new moab::Core;
 
@@ -196,6 +198,36 @@ XYZ rotate_point(XYZ P, double theta, XYZ L1, XYZ L2)
 //
 //
 //}
+moab::ErrorCode test_get_tagged_entities(moab::Core *mbi, int total_cells, 
+                                    std::string tag_name, 
+                                    moab::Range &tagged_vols,
+                                    moab::Range &tagged_surfs,
+                                    moab::Range &tagged_verts)//,
+//                                    moab::Range &tagged_vert_sets)
+{
+  moab::ErrorCode rval;
+  
+  //get tally data
+  std::map<moab::EntityHandle, std::vector<std::string> > tally_assignments = DMD->get_property_assignments("tr",3,":");
+ 
+ //vector of tally props
+ std::vector<std::string> tally_props;
+
+ //loop over all vols
+  for( int i = 1; i <= total_cells; ++i ){
+      moab::EntityHandle vol = DAG->entity_by_index( 3, i );
+      tally_props = tally_assignments[vol];
+      std::cout << "tally props size" << tally_props.size() << std::endl;
+      if(tally_props.size() == 1){
+        if(tally_props[0] == "tr"){
+          std::cout << "tr num" << tally_props[1] << std::endl;
+        }
+      }
+  } 
+ 
+  return moab::MB_SUCCESS;
+
+}
 moab::ErrorCode new_get_tagged_entities(moab::Core *mbi, int total_cells, 
                                     std::string tag_name, 
                                     moab::Range &tagged_vols,
@@ -220,6 +252,7 @@ moab::ErrorCode new_get_tagged_entities(moab::Core *mbi, int total_cells,
       exit(EXIT_FAILURE);
     }
 
+
   // get desired tagged entities
   moab::EntityHandle tagged_meshset;
   moab::Range surf_set, vert_set;
@@ -233,12 +266,43 @@ moab::ErrorCode new_get_tagged_entities(moab::Core *mbi, int total_cells,
   rval = mbi->create_meshset(moab::MESHSET_SET, tagged_meshset);
   //CHECK_ERR(rval);
 
+  std::vector<std::string> properties;
+  std::string val;
+
   for( int i = 1; i <= total_cells; ++i ) 
     {  
       moab::EntityHandle vol = DAG->entity_by_index( 3, i );
       if( DAG->has_prop( vol, tag_name))
-        { 
+        {
+ 
+          rval = DAG->prop_value(vol, tag_name, val);
+          std::cout << "val " << vol << " " << val << std::endl;
+//          std::cout << "properties[0] " << vol << " " << properties[0].c_str() << std::endl;
+//
+//          // loop over the properties and check for any mention
+//          // of the 2nd delimiter, if so extract from 0
+//          // to second delimiter
+//          // by being here we already know he property exists
+//          // being found upto the first delimiter
+//          if (tag_delims.size() > 1) {
+//          std::cout << "if tag delims " << std::endl;
+//            for (int j = 0 ; j < properties.size() ; j++) {
+//              size_t npos = 0, first = npos;
+//              npos = properties[j].find(tag_delims[1]);
+//              // extract from the match - which is either first
+//              // match or .length()
+//              properties[j] = properties[j].substr(0, npos);
+//              std::cout << "properties[j]" << j << " " << properties[j] << std::endl;
+//            }
+//          }
+
+
           tagged_vols.insert(vol);
+
+          //create map of tr#s : range of vols (or verts?)
+          //return map from this fxn
+
+         
 
           rval = mbi->get_child_meshsets(vol, surf_set);
           CHECK_ERR(rval);
@@ -577,12 +641,12 @@ void process_input(char* tfilename,
           if( tokens[0].compare(time_step_start_token ) == 0 && tokens.size() > 1)
             {
               ts = atof(tokens[1].c_str());
-              std::cout << "s " << ts << std::endl;
+              std::cout << "time step " << ts << std::endl;
             }
           if( tokens[0].compare(end_time_start_token ) == 0 && tokens.size() > 1)
             {
               end_t = atof(tokens[1].c_str());
-              std::cout << "e " << end_t << std::endl;
+              std::cout << "end time " << end_t << std::endl;
             }
           if( tokens[0].compare(rotation_start_token ) == 0 && tokens.size() > 1)
             {
@@ -633,7 +697,8 @@ int main(int argc, char* argv[])
   //get moving volumes, surfs, and verts
   moab::Range vols, surfs, mv;
   std::map<moab::EntityHandle, XYZ> orig_positions;
-  rval = new_get_tagged_entities(mbi, num_cells, "moving", vols, surfs, mv);
+  rval = new_get_tagged_entities(mbi, num_cells, "tr", vols, surfs, mv);
+  //rval = test_get_tagged_entities(mbi, num_cells, "tr", vols, surfs, mv);
   std::cout << "num moving vols " << vols.size() << std::endl;
   std::cout << "num moving verts " << mv.size() << std::endl;
 

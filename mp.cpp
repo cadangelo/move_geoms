@@ -3,6 +3,7 @@
 #include "moab/Interface.hpp"
 #include "moab/Types.hpp"
 #include "MBTagConventions.hpp"
+#include "DagMC.hpp"
 
 #include <string>
 #include <fstream>
@@ -49,6 +50,10 @@ int main(int argc, char* argv[])
   moab::ErrorCode rval; 
  
   moab::Core *mbi = new moab::Core();
+  
+  moab::DagMC dagmc = moab::DagMC();
+  //rval = dagmc.load_file(filename);
+  rval = dagmc.parse_properties
 
   // load base geometry file that we wish to move
   char* filename = argv[1];
