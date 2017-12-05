@@ -2,6 +2,7 @@
 #include "moab/Core.hpp"
 #include "moab/Interface.hpp"
 #include "moab/Types.hpp"
+#include "moab/GeomTopoTool.hpp"
 #include "MBTagConventions.hpp"
 #include "DagMC.hpp"
 #include "dagmcmetadata.hpp"
@@ -230,7 +231,7 @@ moab::ErrorCode test_get_tagged_entities(moab::Core *mbi, int total_cells,
 }
 moab::ErrorCode new_get_tagged_entities(moab::Core *mbi, int total_cells, 
                                     std::string tag_name, 
-                                    std::map<std::string, moab::Range> &tr_vols_map)
+                                    std::map<int, moab::Range> &tr_vols_map)
 //                                    moab::Range &tagged_vols,
 //                                    moab::Range &tagged_surfs,
 //                                    moab::Range &tagged_verts)//,
@@ -265,9 +266,7 @@ moab::ErrorCode new_get_tagged_entities(moab::Core *mbi, int total_cells,
   rval = mbi->create_meshset(moab::MESHSET_SET, tagged_meshset);
   //CHECK_ERR(rval);
 
-//  std::vector<std::string> properties;
   std::string val;
-//  std::map<std::string, moab::Range> tr_vols_map; 
 
   for( int i = 1; i <= total_cells; ++i ) 
     {  
@@ -293,10 +292,9 @@ moab::ErrorCode new_get_tagged_entities(moab::Core *mbi, int total_cells,
 //                }
 
             std::cout << "before map" << std::endl; 
-            std::cout << "map size" << tr_vols_map.size() <<  std::endl; 
-          std::map<std::string, moab::Range>::iterator itt;
+          std::map<int, moab::Range>::iterator itt;
           bool added = false;
-          std::string tr_num;
+          int tr_num;
           //if the map is not empty, look for a key that matches the tr # of the volume
           if(tr_vols_map.size() > 0){
             for(itt = tr_vols_map.begin(); itt != tr_vols_map.end(); ++itt){
@@ -307,7 +305,7 @@ moab::ErrorCode new_get_tagged_entities(moab::Core *mbi, int total_cells,
                std::cout << "val num " << val << std::endl; 
                //if tr# of current vol matches one already in map, add vol to range 
                // added = true as soon as vol added to a range
-               if(val == tr_num){
+               if(stoi(val) == tr_num){
                  tr_vols_map[tr_num].insert(vol); 
                  std::cout << "size of range for that tr #" << tr_vols_map[tr_num].size() << std::endl;
                  std::cout << "first elemet" << *tr_vols_map[tr_num].begin() << std::endl;
@@ -322,7 +320,7 @@ moab::ErrorCode new_get_tagged_entities(moab::Core *mbi, int total_cells,
           //and add vol to range
           //if(tr_vols_map.size() == 0 | added == false) {
           if(added == false) {
-            tr_num = val;
+            tr_num = stoi(val);
             tr_vols_map[tr_num].insert(vol); 
             std::cout << "size of range for that tr #" << tr_vols_map[tr_num].size() << std::endl;
             std::cout << "first elemet" << *tr_vols_map[tr_num].begin() << std::endl;
@@ -477,6 +475,7 @@ moab::ErrorCode setup(moab::Core *mbi, char* filename)
   CHECK_ERR(rval);
 
   DAG = new moab::DagMC(mbi);
+  moab::GeomTopoTool *GTT = new moab::GeomTopoTool(mbi);
 
   // load base geometry file that we wish to move
   rval = mbi->load_file(filename);
@@ -484,8 +483,24 @@ moab::ErrorCode setup(moab::Core *mbi, char* filename)
   rval = DAG->load_existing_contents();
   CHECK_ERR(rval);
 
-  rval = DAG->init_OBBTree();
-  CHECK_ERR(rval);
+//  rval = DAG->init_OBBTree();
+//  CHECK_ERR(rval);
+
+  // find all geometry sets
+  rval = GTT->find_geomsets();
+  MB_CHK_SET_ERR(rval, "GeomTopoTool could not find the geometry sets");
+
+  // implicit compliment
+  // EntityHandle implicit_complement;
+  //  rval = GTT->get_implicit_complement(implicit_complement, true);
+  rval = DAG->setup_impl_compl();
+  MB_CHK_SET_ERR(rval, "Failed to setup the implicit compliment");
+
+
+  // setup indices
+  rval = DAG->setup_indices();
+  MB_CHK_SET_ERR(rval, "Failed to setup problem indices");
+
 
 }
 
@@ -578,7 +593,81 @@ void tokenize( const std::string& str,
     }
 }
 
+void new_process_input(char* tfilename, 
+                       std::map< int, double[3]> &tr_vec_map)
+{
+  std::ifstream transform_input(tfilename);
+  std::string line;
+  const char* delimiters = " "; 
+  const char* velocity_start_token = "v"; 
+  const char* a0_start_token = "b";
+  const char* a1_start_token = "c";
+  const char* a2_start_token = "d";
+  const char* L0_start_token = "i";
+  const char* L1_start_token = "j";
+  const char* ang_velocity_start_token = "w";
+  const char* ang_acc_start_token = "a";
+  const char* time_step_start_token = "s";
+  const char* end_time_start_token = "e";
+  const char* rotation_start_token = "r";
+//  const char* translation_start_token = "t";
+  const char* tr_start_token = "t";
+  int tr_num;
+
+  if (transform_input.is_open()){
+    while(std::getline(transform_input, line)){
+      // Skip blank lines in file
+      if (line.length() == 0 ) continue;
+
+      // Tokenize the line
+      std::vector<std::string> tokens;
+      tokenize(line, tokens, delimiters);
+      if (tokens.empty()) continue ; 
+      
+      // TR card info
+      if( tokens[0].compare(tr_start_token ) == 0 && tokens.size() > 1){
+          tr_num = atoi(tokens[1].c_str());
+          (tr_vec_map[tr_num])[0] = atof(tokens[2].c_str());
+          (tr_vec_map[tr_num])[1] = atof(tokens[3].c_str());
+          (tr_vec_map[tr_num])[2] = atof(tokens[4].c_str());
+      }
+    }
+  } 
+}
+
+
+void set_parameters(std::map<int, double [12]> tr_vec_map, 
+                    int tr_num,
+                    XYZ& v_0, XYZ& b, XYZ& c, XYZ& d, 
+                    XYZ& L0, XYZ& L1, double& omega_0, double alpha[3],
+                    double& ts, double& end_t, int& rotation, int& translation)
+{
+
+  v_0.x = tr_vec_map[tr_num][0];
+  v_0.y = tr_vec_map[tr_num][1];
+  v_0.z = tr_vec_map[tr_num][2];
+  
+  b.x = tr_vec_map[tr_num][3];
+  b.y = tr_vec_map[tr_num][4];
+  b.z = tr_vec_map[tr_num][5];
+
+  c.x = tr_vec_map[tr_num][6];
+  c.y = tr_vec_map[tr_num][7];
+  c.z = tr_vec_map[tr_num][8];
+
+  d.x = tr_vec_map[tr_num][9];
+  d.y = tr_vec_map[tr_num][10];
+  d.z = tr_vec_map[tr_num][11];
+
+
+  if( v_0.x + v_0.y + v_0.z != 0.0){
+    translation = 1;
+  }
+
+}
+
 void process_input(char* tfilename, 
+                   std::map< int, double[12]> &tr_vec_map,
                    XYZ& v_0, XYZ& b, XYZ& c, XYZ& d, 
                    XYZ& L0, XYZ& L1, double& omega_0, double alpha[3],
                    double& ts, double& end_t, int& rotation, int& translation)
@@ -597,7 +686,9 @@ void process_input(char* tfilename,
   const char* time_step_start_token = "s";
   const char* end_time_start_token = "e";
   const char* rotation_start_token = "r";
-  const char* translation_start_token = "t";
+  const char* translation_start_token = "x";
+  const char* mcnp_start_token = "t";
+  int tr_num;
 
   if (transform_input.is_open())
    {
@@ -610,33 +701,65 @@ void process_input(char* tfilename,
           std::vector<std::string> tokens;
           tokenize(line, tokens, delimiters);
           if (tokens.empty()) continue ; 
-          
-          // Initial velocity
+  
+          // MCNP TR card input       
+          if( tokens[0].compare(mcnp_start_token ) == 0 && tokens.size() > 1){
+              tr_num = atoi(tokens[1].c_str());
+              (tr_vec_map[tr_num])[0] = atof(tokens[2].c_str());
+              (tr_vec_map[tr_num])[1] = atof(tokens[3].c_str());
+              (tr_vec_map[tr_num])[2] = atof(tokens[4].c_str());
+
+              //if reading from TR card style input, set end_t and ts to 1
+              end_t = 1.0;
+              ts = 1.0; 
+
+          }
+          // Initial velocity-- need to update the rest of these to be like MCNP TR input above
+          // first token should be TR number 
+          // create map of TR nums to motion vectors
+          // will also need to add these to set params fxn
+          // can only have one end_t and ts per transformation text file, so no map for these, obvs
           if( tokens[0].compare(velocity_start_token ) == 0 && tokens.size() > 1)
             {
-              v_0.x = atof(tokens[1].c_str());
-              v_0.y = atof(tokens[2].c_str());
-              v_0.z = atof(tokens[3].c_str());
+             // v_0.x = atof(tokens[1].c_str());
+             // v_0.y = atof(tokens[2].c_str());
+             // v_0.z = atof(tokens[3].c_str());
+              tr_num = atoi(tokens[1].c_str());
+              (tr_vec_map[tr_num])[0] = atof(tokens[2].c_str());
+              (tr_vec_map[tr_num])[1] = atof(tokens[3].c_str());
+              (tr_vec_map[tr_num])[2] = atof(tokens[4].c_str());
             }
           // Acceleration 
           // a(t) = b + ct + dt^2
           if( tokens[0].compare(a0_start_token ) == 0 && tokens.size() > 1)
             {
-              b.x = atof(tokens[1].c_str());
-              b.y = atof(tokens[2].c_str());
-              b.z = atof(tokens[3].c_str());
+             // b.x = atof(tokens[1].c_str());
+             // b.y = atof(tokens[2].c_str());
+             // b.z = atof(tokens[3].c_str());
+              tr_num = atoi(tokens[1].c_str());
+              (tr_vec_map[tr_num])[3] = atof(tokens[2].c_str());
+              (tr_vec_map[tr_num])[4] = atof(tokens[3].c_str());
+              (tr_vec_map[tr_num])[5] = atof(tokens[4].c_str());
             }
           if( tokens[0].compare(a1_start_token ) == 0 && tokens.size() > 1)
             {
-              c.x = atof(tokens[1].c_str());
-              c.y = atof(tokens[2].c_str());
-              c.z = atof(tokens[3].c_str());
+             // c.x = atof(tokens[1].c_str());
+             // c.y = atof(tokens[2].c_str());
+             // c.z = atof(tokens[3].c_str());
+              tr_num = atoi(tokens[1].c_str());
+              (tr_vec_map[tr_num])[6] = atof(tokens[2].c_str());
+              (tr_vec_map[tr_num])[7] = atof(tokens[3].c_str());
+              (tr_vec_map[tr_num])[8] = atof(tokens[4].c_str());
             }
           if( tokens[0].compare(a2_start_token ) == 0 && tokens.size() > 1)
             {
-              d.x = atof(tokens[1].c_str());
-              d.y = atof(tokens[2].c_str());
-              d.z = atof(tokens[3].c_str());
+             // d.x = atof(tokens[1].c_str());
+             // d.y = atof(tokens[2].c_str());
+             // d.z = atof(tokens[3].c_str());
+              tr_num = atoi(tokens[1].c_str());
+              (tr_vec_map[tr_num])[9] = atof(tokens[2].c_str());
+              (tr_vec_map[tr_num])[10] = atof(tokens[3].c_str());
+              (tr_vec_map[tr_num])[11] = atof(tokens[4].c_str());
             }
           // Two points that define line points rotate about 
           if( tokens[0].compare(L0_start_token ) == 0 && tokens.size() > 1)
@@ -706,15 +829,15 @@ moab::ErrorCode get_orig_vert_position(moab::Range mv , std::map<moab::EntityHan
       orig_positions[*itt] = p;
     }
 }
-moab::ErrorCode  get_moving_verts(std::map<std::string, moab::Range> tr_vols_map,
+moab::ErrorCode  get_moving_verts(std::map<int, moab::Range> tr_vols_map,
                                   moab::Range &mv,
-                                  std::map<std::string, moab::Range> &tr_verts_map)
+                                  std::map<int, moab::Range> &tr_verts_map)
 {
   moab::ErrorCode rval;
-  std::string tr_num;
+  int tr_num;
   moab::Range surf_set, vert_set;
   moab::Range::iterator its, itv, itr; 
-  std::map<std::string, moab::Range>::iterator ittr;
+  std::map<int, moab::Range>::iterator ittr;
 
   for(ittr = tr_vols_map.begin(); ittr != tr_vols_map.end(); ++ittr){
     tr_num = ittr->first;
@@ -758,7 +881,7 @@ int main(int argc, char* argv[])
   //get moving volumes, surfs, and verts
   moab::Range vols, surfs, mv;
   //rval = new_get_tagged_entities(mbi, num_cells, "tr", vols, surfs, mv);
-  std::map<std::string, moab::Range> tr_vols_map;
+  std::map<int, moab::Range> tr_vols_map;
   rval = new_get_tagged_entities(mbi, num_cells, "tr", tr_vols_map);
   //rval = test_get_tagged_entities(mbi, num_cells, "tr", vols, surfs, mv);
 
@@ -773,7 +896,7 @@ int main(int argc, char* argv[])
   // map of vertex eh to original position
   std::map<moab::EntityHandle, XYZ> orig_positions;
   std::map<moab::EntityHandle, XYZ> position;
-  std::map<std::string, moab::Range> tr_verts_map;
+  std::map<int, moab::Range> tr_verts_map;
   rval = get_moving_verts(tr_vols_map, mv, tr_verts_map);
   rval = get_orig_vert_position(mv, position);
 
@@ -788,10 +911,13 @@ int main(int argc, char* argv[])
   double end_t; //end time [s]
   int translation;
   int rotation; 
-  process_input(tfilename, v_0, b, c, d, L0, L1, omega_0, alpha, ts, end_t, rotation, translation);
+  //process_input(tfilename, v_0, b, c, d, L0, L1, omega_0, alpha, ts, end_t, rotation, translation);
+  std::map<int, double [12]> tr_vec_map;
+  std::map<int, double [12]>::iterator itrv;
+  //new_process_input(tfilename, tr_vec_map);
+  process_input(tfilename, tr_vec_map, v_0, b, c, d, L0, L1, omega_0, alpha, ts, end_t, rotation, translation);
 
-  std::cout << "velocity " << v_0.x << " " << v_0.y << " " << v_0.z << std::endl;
-  std::cout << "alpha " << alpha[0] << " " << alpha[1] << " " << alpha[2] << std::endl;
+
   
   //Inital point, updated point
   XYZ p_0, p, p_new;
@@ -801,16 +927,21 @@ int main(int argc, char* argv[])
   double t = 0.0; //current time [s]
   int shot_num = 0; //current time step
 
-  std::string tr_num;
+  int tr_num;
  
   //base output file name 
   std::string output_file = "moved.h5m";
 
   moab::Range::iterator its, itt, itv, itx, itz, itvt;
-  std::map<std::string, moab::Range>::iterator ittr, itrv;
+  std::map<int, moab::Range>::iterator ittr;
   std::cout << "t step " << ts << std::endl;
   std::cout << "end time " << end_t << std::endl;
   
+
+  if(tr_verts_map.size() != tr_vec_map.size())
+    std::cout<< "Number of transitions found in geometry does not match number found in transformation text file." << std::endl;
+    std::cout<< "There are " << tr_verts_map.size() << " transitions in the geometry file." << std::endl;
+    std::cout<< "There are " << tr_vec_map.size() << " transitions in the text file." << std::endl;
 
   //set end_t to 1 for relocation translations (single time step)
   // for velocity vectors that need broken into time steps,
@@ -819,11 +950,13 @@ int main(int argc, char* argv[])
       std::cout << "time step t= " << t << std::endl;
 
     //for each TR #
-    for(itrv = tr_verts_map.begin(); itrv != tr_verts_map.end(); ++itrv){
+    //for(itrv = tr_verts_map.begin(); itrv != tr_verts_map.end(); ++itrv){
+    for(itrv = tr_vec_map.begin(); itrv != tr_vec_map.end(); ++itrv){
        tr_num = itrv->first;
        
        //create map of TR #'s to motion vectors
        // then can move each vert w/ correct TR
+       set_parameters(tr_vec_map, tr_num, v_0, b, c, d, L0, L1, omega_0, alpha, ts, end_t, rotation, translation);
 
       //for each vert
       for(itvt =  tr_verts_map[tr_num].begin(); itvt !=  tr_verts_map[tr_num].end(); ++itvt){
@@ -835,6 +968,7 @@ int main(int argc, char* argv[])
              p_new.x = p_0.x + v_0.x*t + (1/2)*b.x*pow(t,2) + (1/6)*c.x*pow(t,3) + (1/12)*d.x*pow(t,4);
              p_new.y = p_0.y + v_0.y*t + (1/2)*b.y*pow(t,2) + (1/6)*c.y*pow(t,3) + (1/12)*d.y*pow(t,4);
              p_new.z = p_0.z + v_0.z*t + (1/2)*b.z*pow(t,2) + (1/6)*c.z*pow(t,3) + (1/12)*d.z*pow(t,4);
+
         }
         
         //if rotation
@@ -850,13 +984,16 @@ int main(int argc, char* argv[])
         xyz_new[2] = p_new.z;
         rval = mbi->set_coords(&(*itvt), 1, xyz_new);
         CHECK_ERR(rval);
+
       }//move each vertex   
  
+             std::cout << "p orig " << p_0.x << std::endl;
+        std::cout<< "p new " << xyz_new[0] << std::endl;
     }//for each TR #
       
-//    rval = mbi->write_mesh( (std::to_string(shot_num)+output_file).c_str());
-    shot_num++;
+    rval = mbi->write_mesh( (std::to_string(shot_num)+output_file).c_str());
     std::cout << "shot num " << shot_num << std::endl;
+    shot_num++;
     t = t + ts;
       
   }//while
