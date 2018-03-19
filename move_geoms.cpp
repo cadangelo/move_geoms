@@ -200,31 +200,34 @@ XYZ rotate_point(XYZ P, double theta, XYZ L1, XYZ L2)
 //
 //}
 moab::ErrorCode test_get_tagged_entities(moab::Core *mbi, int total_cells, 
-                                    std::string tag_name, 
-                                    moab::Range &tagged_vols,
-                                    moab::Range &tagged_surfs,
-                                    moab::Range &tagged_verts)//,
+                                    std::string tag_name) 
+                //                    moab::Range &tagged_vols,
+                //                    moab::Range &tagged_surfs,
+                //                    moab::Range &tagged_verts)//,
 //                                    moab::Range &tagged_vert_sets)
 {
   moab::ErrorCode rval;
   
   //get tally data
-  std::map<moab::EntityHandle, std::vector<std::string> > tally_assignments = DMD->get_property_assignments("tr",3,":");
+  //std::map<moab::EntityHandle, std::vector<std::string> > tally_assignments;
+
+  //tally_assignments = get_property_assignments("tr",3,":");
  
  //vector of tally props
- std::vector<std::string> tally_props;
+ //std::vector<std::string> tally_props;
 
- //loop over all vols
-  for( int i = 1; i <= total_cells; ++i ){
-      moab::EntityHandle vol = DAG->entity_by_index( 3, i );
-      tally_props = tally_assignments[vol];
-      std::cout << "tally props size" << tally_props.size() << std::endl;
-      if(tally_props.size() == 1){
-        if(tally_props[0] == "tr"){
-          std::cout << "tr num" << tally_props[1] << std::endl;
-        }
-      }
-  } 
+// //loop over all vols
+//  for( int i = 1; i <= total_cells; ++i ){
+//      moab::EntityHandle vol = DAG->entity_by_index( 3, i );
+//      tally_props = tally_assignments[vol];
+//      std::cout << "tally props size" << tally_props.size() << std::endl;
+//     // if(tally_props.size() == 1){
+//     //   if(tally_props[0] == "tr"){
+//     //     std::cout << "tr num" << tally_props[1] << std::endl;
+//     //   }
+//     // }
+//     std::cout << "tr tags " << tally_props[0] << "  " << tally_props[1] << std::endl;
+//  } 
  
   return moab::MB_SUCCESS;
 
@@ -246,6 +249,7 @@ moab::ErrorCode new_get_tagged_entities(moab::Core *mbi, int total_cells,
   std::map<std::string, std::string> group_name_synonyms;
 
   group_name.push_back(tag_name);
+
 
   rval = DAG->parse_properties(group_name, group_name_synonyms, tag_delims.c_str());
   if (moab::MB_SUCCESS != rval) 
@@ -269,14 +273,22 @@ moab::ErrorCode new_get_tagged_entities(moab::Core *mbi, int total_cells,
   std::string val;
 
   for( int i = 1; i <= total_cells; ++i ) 
-    {  
+    { 
+      std::vector<std::string> properties;
+ 
       moab::EntityHandle vol = DAG->entity_by_index( 3, i );
+
       if( DAG->has_prop( vol, tag_name))
         {
+          rval = DAG->prop_values(vol, tag_name, properties);
 
+          std::cout << "num trs on vol " << properties.size() << std::endl;
           // get the value of vol's TR number (val) 
           rval = DAG->prop_value(vol, tag_name, val);
           std::cout << "val " << vol << " " << val << std::endl;
+  
+         
+          
 
           // get the vol's vertices
 //          rval = mbi->get_child_meshsets(vol, surf_set);
@@ -884,13 +896,14 @@ int main(int argc, char* argv[])
   std::map<int, moab::Range> tr_vols_map;
   rval = new_get_tagged_entities(mbi, num_cells, "tr", tr_vols_map);
   //rval = test_get_tagged_entities(mbi, num_cells, "tr", vols, surfs, mv);
+  //rval = test_get_tagged_entities(mbi, num_cells, "tr");
 
   moab::Range surf_set, vert_set;
   moab::Range::iterator it, itr;
   surf_set.clear();
   vert_set.clear();
 
-  std::cout << "num moving vols " << vols.size() << std::endl;
+  std::cout << "num moving vols " << tr_vols_map.size() << std::endl;
   //std::cout << "num moving verts " << mv.size() << std::endl;
 
   // map of vertex eh to original position
@@ -940,7 +953,7 @@ int main(int argc, char* argv[])
 
   if(tr_verts_map.size() != tr_vec_map.size())
     std::cout<< "Number of transitions found in geometry does not match number found in transformation text file." << std::endl;
-    std::cout<< "There are " << tr_verts_map.size() << " transitions in the geometry file." << std::endl;
+    std::cout<< "There are " << tr_vols_map.size() << " transitions in the geometry file." << std::endl;
     std::cout<< "There are " << tr_vec_map.size() << " transitions in the text file." << std::endl;
 
   //set end_t to 1 for relocation translations (single time step)
