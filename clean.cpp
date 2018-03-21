@@ -24,13 +24,13 @@ struct XYZ{
 
 moab::Tag category_tag;
 moab::Tag geom_tag;
-moab::Tag name_tag;
-moab::Tag obj_name_tag;
+//moab::Tag name_tag;
+//moab::Tag obj_name_tag;
 moab::Tag dim_tag, id_tag;
 moab::Tag move_tag;
-moab::Tag sense_tag;
-moab::Tag obb_tag;
-moab::Tag obb_tree_tag;
+//moab::Tag sense_tag;
+//moab::Tag obb_tag;
+//moab::Tag obb_tree_tag;
 
 moab::DagMC *DAG;
 
@@ -146,10 +146,10 @@ void tokenize( const std::string& str,
     }
 }
 
-moab::ErrorCode get_tagged_entities(moab::Core *mbi,
-                                    std::string tag_name,
-                                    std::string tag_delims,
-                                    std::map<int, moab::Range> &tagged_vols_map)
+moab::ErrorCode get_tagged_vols(moab::Core *mbi,
+                                std::string tag_name,
+                                std::string tag_delims,
+                                std::map<int, moab::Range> &tagged_vols_map)
 {
   moab::ErrorCode rval;
 
@@ -213,9 +213,31 @@ moab::ErrorCode get_tagged_entities(moab::Core *mbi,
   return moab::MB_SUCCESS;
 }
 
-moab::ErrorCode  get_moving_verts(std::map<int, moab::Range> tr_vols_map,
-                                  moab::Range &mv,
-                                  std::map<int, moab::Range> &tr_verts_map)
+moab::ErrorCode get_orig_vert_position(moab::Range mv , std::map<moab::EntityHandle, XYZ> &orig_positions)
+{
+
+  moab::ErrorCode rval;
+  moab::Range::iterator itt;
+  double xyz[3];
+  XYZ p;
+  //get starting position of each moving vertex
+  for (itt = mv.begin(); itt != mv.end(); ++itt)
+    {
+      rval = mbi->get_coords(&(*itt), 1, xyz);
+      MB_CHK_ERR(rval);
+      
+      p.x = xyz[0];
+      p.y = xyz[1];
+      p.z = xyz[2];
+      
+      //keep original position of each vertex
+      orig_positions[*itt] = p;
+    }
+}
+
+moab::ErrorCode get_tagged_verts(std::map<int, moab::Range> tagged_vols_map,
+                                 moab::Range &tagged_verts,
+                                 std::map<int, moab::Range> &tagged_verts_map)
 {
   moab::ErrorCode rval;
   int tr_num;
@@ -223,10 +245,10 @@ moab::ErrorCode  get_moving_verts(std::map<int, moab::Range> tr_vols_map,
   moab::Range::iterator its, itv, itr; 
   std::map<int, moab::Range>::iterator ittr;
 
-  for(ittr = tr_vols_map.begin(); ittr != tr_vols_map.end(); ++ittr){
+  for(ittr = tagged_vols_map.begin(); ittr != tagged_vols_map.end(); ++ittr){
     tr_num = ittr->first;
     std::cout << "TR # " << tr_num << std::endl;
-    for(itv = tr_vols_map[tr_num].begin(); itv != tr_vols_map[tr_num].end(); ++itv){
+    for(itv = tagged_vols_map[tr_num].begin(); itv != tagged_vols_map[tr_num].end(); ++itv){
       std::cout << "VOL # " << *itv << std::endl;
       // get the vol's vertices
       surf_set.clear();
@@ -239,19 +261,96 @@ moab::ErrorCode  get_moving_verts(std::map<int, moab::Range> tr_vols_map,
         // insert verts into range of all moving verts
         // and into the map of TR #'s to verts
         for (itr = vert_set.begin(); itr != vert_set.end(); itr++){
-            mv.insert(*itr);
-            tr_verts_map[tr_num].insert(*itr);
+            tagged_verts.insert(*itr);
+            tagged_verts_map[tr_num].insert(*itr);
         }
       }
     }
-    std::cout << "num verts in this tr num " << tr_verts_map[tr_num].size() << std::endl;
+   // std::cout << "num verts in this tr num " << tagged_verts_map[tr_num].size() << std::endl;
+      std::cout << "first gtverts " << *tagged_verts_map[tr_num].begin() << std::endl;
   }
-  std::cout << "num all moving verts" << mv.size() << std::endl;
+    std::cout << "num verts in this tr num " << tagged_verts_map[tr_num].size() << std::endl;
+  std::cout << "num all moving verts" << tagged_verts.size() << std::endl;
   return moab::MB_SUCCESS;
 }
 
+/* Funtion to rotate a 3D point a distance theta 
+   around any line (given by two points)
+*/
+XYZ rotate_point(XYZ P, double theta, XYZ L1, XYZ L2)
+{
+   XYZ v, u, q1, q2;
+   double m, d;
+
+   //translate so that rotation axis is origin
+   q1.x = P.x - L1.x;
+   q1.y = P.y - L1.y;
+   q1.z = P.z - L1.z;
+
+   // find unit vector of rotation axis
+   v.x = L2.x - L1.x;
+   v.y = L2.y - L1.y;
+   v.z = L2.z - L1.z;
+   m = sqrt(v.x*v.x + v.y*v.y + v.z*v.z);
+   u.x = v.x/m;
+   u.y = v.y/m;
+   u.z = v.z/m;
+
+   // rotate space about x axis so v lies in xz plane
+
+   // length of u projected onto yz plane
+   d = sqrt(u.y*u.y + u.z*u.z);
+
+   //if d = 0, v is already in xz plane
+   if (d != 0) 
+     {
+       q2.x = q1.x;
+       q2.y = q1.y * u.z / d - q1.z * u.y / d;
+       q2.z = q1.y * u.y / d + q1.z * u.z / d;
+     } 
+   else 
+     {
+       q2 = q1;
+     }
+
+   // rotate space about y axis so v lies along z axis
+   q1.x = q2.x * d - q2.z * u.x;
+   q1.y = q2.y;
+   q1.z = q2.x * u.x + q2.z * d;
+ 
+   // rotate space by angle theta about z axis
+   q2.x = q1.x * cos(theta) - q1.y * sin(theta);
+   q2.y = q1.x * sin(theta) + q1.y * cos(theta);
+   q2.z = q1.z;
+
+   // inverse of y axis rotation
+   q1.x =   q2.x * d + q2.z * u.x;
+   q1.y =   q2.y;
+   q1.z = - q2.x * u.x + q2.z * d;
+
+   // inverse of x axis rotation
+   if (d != 0) 
+     {
+       q2.x =   q1.x;
+       q2.y =   q1.y * u.z / d + q1.z * u.y / d;
+       q2.z = - q1.y * u.y / d + q1.z * u.z / d;
+     } 
+   else
+     {
+       q2 = q1;
+     }
+
+   // inverse of translation to origin
+   q1.x = q2.x + L1.x;
+   q1.y = q2.y + L1.y;
+   q1.z = q2.z + L1.z;
+
+   // return rotated point
+   return(q1);
+}
 void process_input(char* tfilename, 
                    std::map< int, double[12]> &tr_vec_map,
+                   std::map<int, std::vector<int>> &step_tr_map,
                    XYZ& v_0, XYZ& b, XYZ& c, XYZ& d, 
                    XYZ& L0, XYZ& L1, double& omega_0, double alpha[3],
                    double& ts, double& end_t, int& rotation, int& translation)
@@ -273,6 +372,9 @@ void process_input(char* tfilename,
   const char* translation_start_token = "x";
   const char* mcnp_start_token = "t";
   int tr_num;
+  int step_num;
+  std::vector<int> tr_nums;
+//  std::map<int, std::vector<int>> step_tr_map;
 
   if (transform_input.is_open())
    {
@@ -288,10 +390,13 @@ void process_input(char* tfilename,
   
           // MCNP TR card input       
           if( tokens[0].compare(mcnp_start_token ) == 0 && tokens.size() > 1){
-              tr_num = atoi(tokens[1].c_str());
-              (tr_vec_map[tr_num])[0] = atof(tokens[2].c_str());
-              (tr_vec_map[tr_num])[1] = atof(tokens[3].c_str());
-              (tr_vec_map[tr_num])[2] = atof(tokens[4].c_str());
+              step_num = atoi(tokens[1].c_str());
+              tr_num = atoi(tokens[2].c_str());
+              step_tr_map[step_num].push_back(tr_num);
+              std::cout << "s t m " << step_num << " " << step_tr_map[step_num].size() << std::endl; 
+              (tr_vec_map[tr_num])[0] = atof(tokens[3].c_str());
+              (tr_vec_map[tr_num])[1] = atof(tokens[4].c_str());
+              (tr_vec_map[tr_num])[2] = atof(tokens[5].c_str());
 
               //if reading from TR card style input, set end_t and ts to 1
               end_t = 1.0;
@@ -392,6 +497,36 @@ void process_input(char* tfilename,
    }
 }
 
+void set_parameters(std::map<int, double [12]> tr_vec_map, 
+                    int tr_num,
+                    XYZ& v_0, XYZ& b, XYZ& c, XYZ& d, 
+                    XYZ& L0, XYZ& L1, double& omega_0, double alpha[3],
+                    double& ts, double& end_t, int& rotation, int& translation)
+{
+
+  v_0.x = tr_vec_map[tr_num][0];
+  v_0.y = tr_vec_map[tr_num][1];
+  v_0.z = tr_vec_map[tr_num][2];
+  
+  b.x = tr_vec_map[tr_num][3];
+  b.y = tr_vec_map[tr_num][4];
+  b.z = tr_vec_map[tr_num][5];
+
+  c.x = tr_vec_map[tr_num][6];
+  c.y = tr_vec_map[tr_num][7];
+  c.z = tr_vec_map[tr_num][8];
+
+  d.x = tr_vec_map[tr_num][9];
+  d.y = tr_vec_map[tr_num][10];
+  d.z = tr_vec_map[tr_num][11];
+
+
+  if( v_0.x + v_0.y + v_0.z != 0.0){
+    translation = 1;
+  }
+
+}
+
 
 int main(int argc, char* argv[]) 
 {
@@ -403,15 +538,13 @@ int main(int argc, char* argv[])
   rval = setup(mbi, gfilename);
 
 
-  //get moving volumes, surfs, and verts
-  moab::Range vols, surfs, mv;
+  //get moving volumes and verts
+  moab::Range vols;
   std::map<int, moab::Range> tr_vols_map;
   std::string tag_name = "tr";
   std::string tag_delims = ":";
-  rval = get_tagged_entities(mbi, tag_name, tag_delims, tr_vols_map);
+  rval = get_tagged_vols(mbi, tag_name, tag_delims, tr_vols_map);
  
-  std::map<int, moab::Range> tr_verts_map;
-  rval = get_moving_verts(tr_vols_map, mv, tr_verts_map);
 
   //process input function
   XYZ v, v_0;
@@ -424,16 +557,130 @@ int main(int argc, char* argv[])
   double end_t; //end time [s]
   int translation;
   int rotation; 
-  //process_input(tfilename, v_0, b, c, d, L0, L1, omega_0, alpha, ts, end_t, rotation, translation);
   std::map<int, double [12]> tr_vec_map;
   std::map<int, double [12]>::iterator itrv;
-  //new_process_input(tfilename, tr_vec_map);
-  process_input(tfilename, tr_vec_map, v_0, b, c, d, L0, L1, omega_0, alpha, ts, end_t, rotation, translation);
+  std::map<int, std::vector<int>>::iterator its;
+  std::map<int, std::vector<int>> step_tr_map;
+  std::vector<int> tr_nums;
+  process_input(tfilename, tr_vec_map, step_tr_map, v_0, b, c, d, L0, L1, omega_0, alpha, ts, end_t, rotation, translation);
+  
+  moab::Range mv;
+  std::map<int, moab::Range> tr_verts_map;
+  rval = get_tagged_verts(tr_vols_map, mv, tr_verts_map);MB_CHK_ERR(rval);
+      std::cout << "num verts in tr3 " << tr_verts_map[3].size() << std::endl;
+ 
+  
+// map of vertex eh to original position
+//  std::map<moab::EntityHandle, XYZ> orig_positions;
+  std::map<moab::EntityHandle, XYZ> position;
+//  std::map<int, moab::Range> tr_verts_map;
+//  rval = get_moving_verts(tr_vols_map, mv, tr_verts_map);
+  rval = get_orig_vert_position(mv, position);
+  std::cout << "position " << position[*mv.begin()].x << std::endl;
 
+  //Inital point, updated point
+  XYZ p_0, p, p_new;
+  double xyz[3], xyz_new[3];
+
+  double t = 0.0; //current time [s]
+  int shot_num = 0; //current time step
+
+  int tr_num;
+  int step_num;
+ 
+  //base output file name 
+  std::string output_file = "moved.h5m";
+
+  moab::Range::iterator itt, itv, itx, itz, itvt;
+  std::map<int, moab::Range>::iterator ittr;
+  std::cout << "t step " << ts << std::endl;
+  std::cout << "end time " << end_t << std::endl;
+
+  std::cout << "verts map size1 " << tr_verts_map.size() << std::endl;
   // make sure # trs in geom file == # trs in text file
-  if(tr_verts_map.size() != tr_vec_map.size())
+  if(tr_verts_map.size() != tr_vec_map.size()){
     std::cout<< "Number of transitions found in geometry does not match number found in transformation text file." << std::endl;
     std::cout<< "There are " << tr_vols_map.size() << " transitions in the geometry file." << std::endl;
     std::cout<< "There are " << tr_vec_map.size() << " transitions in the text file." << std::endl;
+  }
 
+      std::cout << "verts map size2 " << tr_verts_map.size() << std::endl;
+  //set end_t to 1 for relocation translations (single time step)
+  // for velocity vectors that need broken into time steps,
+  // set start_t and end_t to full length of time
+//  while (t <= end_t){
+//    std::cout << "time step t= " << t << std::endl;
+    //for each time step 
+    for(its = step_tr_map.begin(); its != step_tr_map.end(); ++its){
+      tr_nums = step_tr_map[its->first];
+      step_num =  its->first;
+      std::cout << "step # " << step_num << std::endl;
+      std::cout << "verts map size3 " << tr_verts_map.size() << std::endl;
+    //for each TR #
+    for(int i = 0; i < tr_nums.size(); i++){
+       tr_num = tr_nums[i];
+       std::cout << "tr num " << tr_num << std::endl;
+       
+       //create map of TR #'s to motion vectors
+       // then can move each vert w/ correct TR
+  //     set_parameters(tr_vec_map, tr_num, v_0, b, c, d, L0, L1, omega_0, alpha, ts, end_t, rotation, translation);
+  v_0.x = tr_vec_map[tr_num][0];
+  v_0.y = tr_vec_map[tr_num][1];
+  v_0.z = tr_vec_map[tr_num][2];
+      std::cout << "v 0 x " << v_0.x << std::endl;
+      //for each vert
+      std::cout << "verts map size " << tr_verts_map.size() << std::endl;
+      std::cout << "# verts in this tr " << tr_verts_map[tr_num].size() << std::endl;
+      std::cout << "verts x " << position[*tr_verts_map[tr_num].end()].x << std::endl;
+      std::cout << "orig x pos " << p.x << std::endl;
+      for(itvt =  tr_verts_map[tr_num].begin(); itvt !=  tr_verts_map[tr_num].end(); ++itvt){
+        std::cout << "vert # " << *itvt << std::endl;
+        //get original position
+        p_0 = position[*itvt];
+        std::cout << "p 0 x " << p_0.x << std::endl;
+      
+        //if translation
+     //   if (translation == 1){
+             //p_new.x = p_0.x + v_0.x*t + (1/2)*b.x*pow(t,2) + (1/6)*c.x*pow(t,3) + (1/12)*d.x*pow(t,4);
+             p_new.x = p_0.x + v_0.x;
+             //p_new.y = p_0.y + v_0.y*t + (1/2)*b.y*pow(t,2) + (1/6)*c.y*pow(t,3) + (1/12)*d.y*pow(t,4);
+             p_new.y = p_0.y + v_0.y;
+             //p_new.z = p_0.z + v_0.z*t + (1/2)*b.z*pow(t,2) + (1/6)*c.z*pow(t,3) + (1/12)*d.z*pow(t,4);
+             p_new.z = p_0.z + v_0.z;
+
+   //     }
+        
+   //     //if rotation
+   //     if (rotation == 1){ 
+   //         double omega = omega_0 + alpha[0]*t + (1/2)*alpha[1]*pow(t,2) + (1/3)*alpha[2]*pow(t,3);
+   //         theta = omega*t;
+   //         p_new = rotate_point(p_0, theta, L0, L1);
+   //     }
+      
+        //set the coordinates of the updated position  
+        xyz_new[0] = p_new.x;
+        xyz_new[1] = p_new.y;
+        xyz_new[2] = p_new.z;
+        rval = mbi->set_coords(&(*itvt), 1, xyz_new);
+        MB_CHK_ERR(rval);
+
+      }//move each vertex   
+ 
+      std::cout << "p orig " << p_0.x << " " << p_0.y <<  std::endl;
+      std::cout << "p new " << xyz_new[0] << " " << xyz_new[1] << std::endl;
+    }//for each TR #
+      
+    std::string filenum;
+    //filenum = std::to_string(tr_num)+std::to_string(shot_num);
+    filenum = std::to_string(step_num);
+    //rval = mbi->write_mesh( (std::to_string(shot_num)+output_file).c_str());
+    //rval = mbi->write_mesh( (filenum+output_file).c_str());
+    std::cout << "file num " << filenum << std::endl;
+//    t = t + ts;
+    } // for each time step
+      
+//  }//while
+
+  delete DAG;
+  return 0;
 }
