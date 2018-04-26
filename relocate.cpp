@@ -245,10 +245,6 @@ moab::ErrorCode get_tagged_verts(std::map<int, moab::Range> tagged_vols_map,
   moab::Range::iterator its, itv, itr, ite, itvt; 
   std::map<int, moab::Range>::iterator ittr;
 
-  rval =  mbi->get_entities_by_type(0, moab::MBVERTEX, all_vert_set);
-        MB_CHK_ERR(rval);
-        std::cout << "all vert set " << all_vert_set.size() << std::endl;
-  
   for(ittr = tagged_vols_map.begin(); ittr != tagged_vols_map.end(); ++ittr){
     tr_num = ittr->first;
     for(itv = tagged_vols_map[tr_num].begin(); itv != tagged_vols_map[tr_num].end(); ++itv){
@@ -281,7 +277,6 @@ moab::ErrorCode get_tagged_verts(std::map<int, moab::Range> tagged_vols_map,
           tagged_verts.insert(*itr);
           tagged_verts_map[tr_num].insert(*itr);
       }
-      std::cout << "in gtv # verts " << tagged_verts_map[tr_num].size() << std::endl;
     }
   }
   return moab::MB_SUCCESS;
