@@ -54,6 +54,10 @@ moab::ErrorCode get_all_handles(moab::Core *mbi)
   rval = mbi->tag_get_handle( "MOVE_TAG", 32, moab::MB_TYPE_OPAQUE,
 			      move_tag, moab::MB_TAG_SPARSE|moab::MB_TAG_CREAT);
   MB_CHK_ERR(rval);
+  
+//  rval = mbi->tag_get_handle( "TIME_TAG", 32, moab::MB_TYPE_OPAQUE,
+//			      time_tag, moab::MB_TAG_SPARSE|moab::MB_TAG_CREAT);
+//  MB_CHK_ERR(rval);
 
   int negone = -1;
   rval = mbi->tag_get_handle( GEOM_DIMENSION_TAG_NAME, 1, moab::MB_TYPE_INTEGER,
@@ -109,8 +113,8 @@ moab::ErrorCode setup(moab::Core *mbi, char* filename)
   // implicit compliment
   // EntityHandle implicit_complement;
   //  rval = GTT->get_implicit_complement(implicit_complement, true);
-  rval = DAG->setup_impl_compl();
-  MB_CHK_SET_ERR(rval, "Failed to setup the implicit compliment");
+//  rval = DAG->setup_impl_compl();
+//  MB_CHK_SET_ERR(rval, "Failed to setup the implicit compliment");
 
 
   // setup indices
@@ -390,6 +394,8 @@ void process_input(char* tfilename,
               (tr_vec_map[tr_num])[0] = atof(tokens[3].c_str());
               (tr_vec_map[tr_num])[1] = atof(tokens[4].c_str());
               (tr_vec_map[tr_num])[2] = atof(tokens[5].c_str());
+              // last entry is for time in position
+              //(tr_vec_map[tr_num])[3] = atof(tokens[6].c_str());
 
           }
         }
@@ -436,8 +442,9 @@ int main(int argc, char* argv[])
   std::map<int, std::vector<int>>::iterator its;
   std::map<int, std::vector<int>> step_tr_map;
   std::vector<int> tr_nums;
+  double time_in_position;
   process_input(tfilename, tr_vec_map, step_tr_map, v_0);
-  
+
 
   //Inital point, updated point
   XYZ p_0, p, p_new;
@@ -454,6 +461,10 @@ int main(int argc, char* argv[])
 
   moab::Range::iterator itt, itv, itx, itz, itvt;
   std::map<int, moab::Range>::iterator ittr;
+
+  //set time weight tag
+  //rval = mbi.tag_set_data(time_tag, &(*it), 1, &groupwise_flux[0]);//MB_CHK_ERR(rval);
+  
 
   // make sure # trs in geom file == # trs in text file
   if(tr_verts_map.size() != tr_vec_map.size()){
@@ -475,6 +486,7 @@ int main(int argc, char* argv[])
        }
        //create map of TR #'s to motion vectors
        set_parameters(tr_vec_map, tr_num, v_0);
+       std::cout << "tr vec map [1] " << tr_vec_map[tr_num][0] << std::endl;
       //for each vert
       for(itvt =  tr_verts_map[tr_num].begin(); itvt !=  tr_verts_map[tr_num].end(); ++itvt){
         //get original position
@@ -482,6 +494,7 @@ int main(int argc, char* argv[])
       
         // translation
         p_new.x = p_0.x + v_0.x;
+//        std::cout << "p0 " << p_0.x << ", v_0" << v_0.x << std::endl;
         p_new.y = p_0.y + v_0.y;
         p_new.z = p_0.z + v_0.z;
       
