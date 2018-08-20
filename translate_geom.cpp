@@ -6,6 +6,7 @@
 #include "MBTagConventions.hpp"
 #include "DagMC.hpp"
 #include "dagmcmetadata.hpp"
+#include <bits/stdc++.h>
 
 #include <string>
 #include <fstream>
@@ -16,82 +17,18 @@
 #include <ctype.h>
 #include <string.h>
 
+moab::DagMC *DAG;
+moab::Core *mbi = new moab::Core;
+
 struct XYZ{
   double x;
   double y;
   double z;
 };
 
-moab::Tag category_tag;
-moab::Tag geom_tag;
-//moab::Tag name_tag;
-//moab::Tag obj_name_tag;
-moab::Tag dim_tag, id_tag;
-moab::Tag move_tag;
-//moab::Tag sense_tag;
-//moab::Tag obb_tag;
-//moab::Tag obb_tree_tag;
-
-moab::DagMC *DAG;
-
-dagmcMetaData* DMD;
-
-moab::Core *mbi = new moab::Core;
-
-
-moab::ErrorCode get_all_handles(moab::Core *mbi)
-{
-  moab::ErrorCode rval;
-
-//  rval = mbi->tag_get_handle( NAME_TAG_NAME, NAME_TAG_SIZE, moab::MB_TYPE_OPAQUE,
-//			      name_tag, moab::MB_TAG_SPARSE|moab::MB_TAG_CREAT);
-//  MB_CHK_ERR(rval);
-//
-//  rval = mbi->tag_get_handle( "OBJECT_NAME", 32, moab::MB_TYPE_OPAQUE,
-//			      obj_name_tag, moab::MB_TAG_SPARSE|moab::MB_TAG_CREAT);
-//  MB_CHK_ERR(rval);
-
-  rval = mbi->tag_get_handle( "MOVE_TAG", 32, moab::MB_TYPE_OPAQUE,
-			      move_tag, moab::MB_TAG_SPARSE|moab::MB_TAG_CREAT);
-  MB_CHK_ERR(rval);
-  
-//  rval = mbi->tag_get_handle( "TIME_TAG", 32, moab::MB_TYPE_OPAQUE,
-//			      time_tag, moab::MB_TAG_SPARSE|moab::MB_TAG_CREAT);
-//  MB_CHK_ERR(rval);
-
-  int negone = -1;
-  rval = mbi->tag_get_handle( GEOM_DIMENSION_TAG_NAME, 1, moab::MB_TYPE_INTEGER,
-			      geom_tag, moab::MB_TAG_SPARSE|moab::MB_TAG_CREAT,&negone);
-  MB_CHK_ERR(rval);
-
-  rval = mbi->tag_get_handle( GLOBAL_ID_TAG_NAME,
-			      1, moab::MB_TYPE_INTEGER,
-			      id_tag,
-			      moab::MB_TAG_DENSE|moab::MB_TAG_CREAT );
-  MB_CHK_ERR(rval);
-  
-  rval = mbi->tag_get_handle( CATEGORY_TAG_NAME,
-			      CATEGORY_TAG_SIZE,
-			      moab::MB_TYPE_OPAQUE,
-			      category_tag,
-			      moab::MB_TAG_SPARSE|moab::MB_TAG_CREAT );
-
-  MB_CHK_ERR(rval);
-
-//  rval = mbi->tag_get_handle("GEOM_SENSE_2", 2, moab::MB_TYPE_HANDLE,
-//                             sense_tag, moab::MB_TAG_SPARSE|moab::MB_TAG_CREAT );
-//  MB_CHK_ERR(rval);
-
-  return moab::MB_SUCCESS;
-}
-
 moab::ErrorCode setup(moab::Core *mbi, char* filename)
 {
   moab::ErrorCode rval;
-
-  // get all moab tag handles 
-  rval = get_all_handles(mbi);
-  MB_CHK_ERR(rval);
 
   DAG = new moab::DagMC(mbi);
   moab::GeomTopoTool *GTT = new moab::GeomTopoTool(mbi);
@@ -141,8 +78,6 @@ void tokenize( const std::string& str,
 }
 
 moab::ErrorCode get_tagged_vols(moab::Core *mbi,
-                //                std::string tag_name,
-                //                std::string tag_delims,
                                 std::map<int, moab::Range> &tagged_vols_map)
 {
   moab::ErrorCode rval;
@@ -157,14 +92,6 @@ moab::ErrorCode get_tagged_vols(moab::Core *mbi,
   group_name.push_back(tag_name);
   rval = DAG->parse_properties(group_name, group_name_synonyms, tag_delims.c_str());
   MB_CHK_SET_ERR(rval, "DAGMC failed to parse metadata properties");
-
-  // get desired tagged entities
-//  moab::EntityHandle tagged_meshset;
-//  moab::Range surf_set, vert_set;
-//  int num_verts;
-//  moab::Range::iterator it, itr;
-//  rval = mbi->create_meshset(moab::MESHSET_SET, tagged_meshset);
-//  MB_CHK_ERR(rval);
 
   // get total number of volumes
   int all_vols = DAG->num_entities( 3 );
@@ -193,9 +120,6 @@ moab::ErrorCode get_tagged_vols(moab::Core *mbi,
               added = true;
               break;
             }
-            // if added not true, keep looping, if true exit loop
-//            if(added == true)
-//              break;
          }//for each key in map
        }//if tr map not empty
        //if map empty or no matching key found, create key and add vol to range
@@ -356,21 +280,16 @@ XYZ rotate_point(XYZ P, double theta, XYZ L1, XYZ L2)
 }
 void process_input(char* tfilename, 
                    std::map< int, double[5]> &tr_vec_map,
-//                   std::map<int, std::vector<int>> &step_tr_map,
                    int &number_points,
                    double &total_time)
-//                   XYZ &v_0)
 {
   std::ifstream transform_input(tfilename);
   std::string line;
   const char* delimiters = " "; 
   const char* velocity_start_token = "v"; 
-  //const char* mcnp_start_token = "t";
   const char* total_time_start_token = "t";
   const char* number_points_start_token = "n";
   int tr_num;
-//  int step_num;
-//  std::vector<int> tr_nums;
 
   if (transform_input.is_open())
    {
@@ -404,8 +323,7 @@ void process_input(char* tfilename,
    }
 }
 
-// should send this current t, and update v accordingly
-void set_parameters(std::map<int, double [5]> tr_vec_map, 
+void set_transformation_distance(std::map<int, double [5]> tr_vec_map, 
                     int tr_num,
                     double t,
                     XYZ& tr)
@@ -433,7 +351,6 @@ int main(int argc, char* argv[])
   rval = setup(mbi, gfilename);
 
   //get moving volumes and verts
-  //moab::Range vols;
   std::map<int, moab::Range> tr_vols_map;
   rval = get_tagged_vols(mbi, tr_vols_map);
   moab::Range mv;
@@ -445,18 +362,11 @@ int main(int argc, char* argv[])
   rval = get_orig_vert_position(mv, position);
 
   //process transformation text file info
-  XYZ v, v_0;
   std::map<int, double [5]> tr_vec_map;
-//  std::map<int, double [3]>::iterator itrv;
-  std::map<int, std::vector<int>>::iterator its;
-  //std::map<int, std::vector<int>> step_tr_map;
-//  std::vector<int> tr_nums;
   int number_points = 1; //default is one time step
   double total_time = 1.0; //default is 1 s
-  //process_input(tfilename, tr_vec_map, step_tr_map, v_0);
   process_input(tfilename, tr_vec_map, number_points, total_time);
   double time_step_size = total_time/number_points;
-  std::cout << "step size " << time_step_size << std::endl;
 
   // make sure # trs in geom file == # trs in text file
   if(tr_verts_map.size() != tr_vec_map.size()){
@@ -466,54 +376,28 @@ int main(int argc, char* argv[])
   }
 
   //Inital point, updated point
-  XYZ p_0, p, p_new;
-  double xyz[3], xyz_new[3];
+  XYZ p_0;
+  double xyz_new[3];
 
   double t = 0.0; //current time [s]
-//  int shot_num = 0; //current time step
-
-//  int tr_num;
-//  int step_num;
  
-  moab::Range::iterator itt, itx, itz, itvt;
-  std::map<int, moab::Range>::iterator ittr;
-
-  //set time weight tag
-  //rval = mbi.tag_set_data(time_tag, &(*it), 1, &groupwise_flux[0]);//MB_CHK_ERR(rval);
-  
-
-
-    //for each time step 
-//  for(its = step_tr_map.begin(); its != step_tr_map.end(); ++its){
-//    step_num =  its->first;
-//    tr_nums = step_tr_map[its->first];
   while( t <= total_time) {
     //for each TR #
     std::map<int, double[5]>::iterator itv;
     for(itv = tr_vec_map.begin(); itv != tr_vec_map.end(); ++itv){
-//    for(int i = 0; i < tr_vec_map.size(); i++){
-//      if(tr_verts_map.find(tr_num) == tr_verts_map.end()){
-//        std::cout << "TR number " << tr_num << " in file not found in geometry." << std::endl;
-//        exit (EXIT_FAILURE);
-//      }
       int tr_num = itv->first;
-      std::cout << "tr num in time loop " << tr_num << std::endl;
       double start_time = (tr_vec_map[tr_num])[3];
       double end_time = (tr_vec_map[tr_num])[4];
       //if t is between start and end time, update pos of vol based on this TR
       if( t >= start_time && t <= end_time){
        //create map of TR #'s to motion vectors
        XYZ trans_vec;
-       set_parameters(tr_vec_map, tr_num, t, trans_vec);
-       std::cout << "tr vec map [1] " << tr_vec_map[tr_num][0] << std::endl;
+       set_transformation_distance(tr_vec_map, tr_num, t, trans_vec);
        //for each vert
+       moab::Range::iterator itvt;
        for(itvt =  tr_verts_map[tr_num].begin(); itvt !=  tr_verts_map[tr_num].end(); ++itvt){
          //get original position
          p_0 = position[*itvt];
-         // translation
-        // p_new.x = p_0.x + v_0.x;
-        // p_new.y = p_0.y + v_0.y;
-        // p_new.z = p_0.z + v_0.z;
        
          //set the coordinates of the updated position  
          xyz_new[0] = p_0.x + trans_vec.x;
@@ -526,11 +410,9 @@ int main(int argc, char* argv[])
       }//if btwn st/et
     }//for each TR #
 
-    std::cout << "orig " << p_0.x << std::endl;      
-    std::cout << "new " << xyz_new[0] << std::endl;      
     std::string base;
     get_base_filename(std::string(gfilename), base);
-    std::string filenum = std::to_string(t);
+    std::string filenum = std::to_string(int(t));
     rval = mbi->write_mesh( (filenum+"_"+base+".h5m").c_str());
  
     // update time
