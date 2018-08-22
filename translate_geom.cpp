@@ -204,80 +204,82 @@ moab::ErrorCode get_tagged_verts(std::map<int, moab::Range> tagged_vols_map,
   return moab::MB_SUCCESS;
 }
 
+// Need to add rotation functionality back in
+
 /* Funtion to rotate a 3D point a distance theta 
    around any line (given by two points)
 */
-XYZ rotate_point(XYZ P, double theta, XYZ L1, XYZ L2)
-{
-   XYZ v, u, q1, q2;
-   double m, d;
-
-   //translate so that rotation axis is origin
-   q1.x = P.x - L1.x;
-   q1.y = P.y - L1.y;
-   q1.z = P.z - L1.z;
-
-   // find unit vector of rotation axis
-   v.x = L2.x - L1.x;
-   v.y = L2.y - L1.y;
-   v.z = L2.z - L1.z;
-   m = sqrt(v.x*v.x + v.y*v.y + v.z*v.z);
-   u.x = v.x/m;
-   u.y = v.y/m;
-   u.z = v.z/m;
-
-   // rotate space about x axis so v lies in xz plane
-
-   // length of u projected onto yz plane
-   d = sqrt(u.y*u.y + u.z*u.z);
-
-   //if d = 0, v is already in xz plane
-   if (d != 0) 
-     {
-       q2.x = q1.x;
-       q2.y = q1.y * u.z / d - q1.z * u.y / d;
-       q2.z = q1.y * u.y / d + q1.z * u.z / d;
-     } 
-   else 
-     {
-       q2 = q1;
-     }
-
-   // rotate space about y axis so v lies along z axis
-   q1.x = q2.x * d - q2.z * u.x;
-   q1.y = q2.y;
-   q1.z = q2.x * u.x + q2.z * d;
- 
-   // rotate space by angle theta about z axis
-   q2.x = q1.x * cos(theta) - q1.y * sin(theta);
-   q2.y = q1.x * sin(theta) + q1.y * cos(theta);
-   q2.z = q1.z;
-
-   // inverse of y axis rotation
-   q1.x =   q2.x * d + q2.z * u.x;
-   q1.y =   q2.y;
-   q1.z = - q2.x * u.x + q2.z * d;
-
-   // inverse of x axis rotation
-   if (d != 0) 
-     {
-       q2.x =   q1.x;
-       q2.y =   q1.y * u.z / d + q1.z * u.y / d;
-       q2.z = - q1.y * u.y / d + q1.z * u.z / d;
-     } 
-   else
-     {
-       q2 = q1;
-     }
-
-   // inverse of translation to origin
-   q1.x = q2.x + L1.x;
-   q1.y = q2.y + L1.y;
-   q1.z = q2.z + L1.z;
-
-   // return rotated point
-   return(q1);
-}
+//XYZ rotate_point(XYZ P, double theta, XYZ L1, XYZ L2)
+//{
+//   XYZ v, u, q1, q2;
+//   double m, d;
+//
+//   //translate so that rotation axis is origin
+//   q1.x = P.x - L1.x;
+//   q1.y = P.y - L1.y;
+//   q1.z = P.z - L1.z;
+//
+//   // find unit vector of rotation axis
+//   v.x = L2.x - L1.x;
+//   v.y = L2.y - L1.y;
+//   v.z = L2.z - L1.z;
+//   m = sqrt(v.x*v.x + v.y*v.y + v.z*v.z);
+//   u.x = v.x/m;
+//   u.y = v.y/m;
+//   u.z = v.z/m;
+//
+//   // rotate space about x axis so v lies in xz plane
+//
+//   // length of u projected onto yz plane
+//   d = sqrt(u.y*u.y + u.z*u.z);
+//
+//   //if d = 0, v is already in xz plane
+//   if (d != 0) 
+//     {
+//       q2.x = q1.x;
+//       q2.y = q1.y * u.z / d - q1.z * u.y / d;
+//       q2.z = q1.y * u.y / d + q1.z * u.z / d;
+//     } 
+//   else 
+//     {
+//       q2 = q1;
+//     }
+//
+//   // rotate space about y axis so v lies along z axis
+//   q1.x = q2.x * d - q2.z * u.x;
+//   q1.y = q2.y;
+//   q1.z = q2.x * u.x + q2.z * d;
+// 
+//   // rotate space by angle theta about z axis
+//   q2.x = q1.x * cos(theta) - q1.y * sin(theta);
+//   q2.y = q1.x * sin(theta) + q1.y * cos(theta);
+//   q2.z = q1.z;
+//
+//   // inverse of y axis rotation
+//   q1.x =   q2.x * d + q2.z * u.x;
+//   q1.y =   q2.y;
+//   q1.z = - q2.x * u.x + q2.z * d;
+//
+//   // inverse of x axis rotation
+//   if (d != 0) 
+//     {
+//       q2.x =   q1.x;
+//       q2.y =   q1.y * u.z / d + q1.z * u.y / d;
+//       q2.z = - q1.y * u.y / d + q1.z * u.z / d;
+//     } 
+//   else
+//     {
+//       q2 = q1;
+//     }
+//
+//   // inverse of translation to origin
+//   q1.x = q2.x + L1.x;
+//   q1.y = q2.y + L1.y;
+//   q1.z = q2.z + L1.z;
+//
+//   // return rotated point
+//   return(q1);
+//}
 void process_input(char* tfilename, 
                    std::map< int, double[5]> &tr_vec_map,
                    int &number_points,
