@@ -19,6 +19,7 @@
 
 moab::DagMC *DAG;
 moab::Core *mbi = new moab::Core;
+//moab::GeomTopoTool *GTT;
 
 struct XYZ{
   double x;
@@ -26,12 +27,14 @@ struct XYZ{
   double z;
 };
 
+moab::Tag dt_move_tag;
+
 moab::ErrorCode setup(moab::Core *mbi, char* filename)
 {
   moab::ErrorCode rval;
 
   DAG = new moab::DagMC(mbi);
-  moab::GeomTopoTool *GTT = new moab::GeomTopoTool(mbi);
+ // moab::GeomTopoTool *GTT = new moab::GeomTopoTool(mbi);
 
   // load base geometry file that we wish to move
   rval = mbi->load_file(filename);
@@ -41,12 +44,20 @@ moab::ErrorCode setup(moab::Core *mbi, char* filename)
   MB_CHK_ERR(rval);
 
   // find all geometry sets
-  rval = GTT->find_geomsets();
-  MB_CHK_SET_ERR(rval, "GeomTopoTool could not find the geometry sets");
+ // rval = GTT->find_geomsets();
+ // MB_CHK_SET_ERR(rval, "GeomTopoTool could not find the geometry sets");
 
   // setup indices
   rval = DAG->setup_indices();
   MB_CHK_SET_ERR(rval, "Failed to setup problem indices");
+
+  // generate IC
+  rval = DAG->setup_impl_compl();
+  MB_CHK_ERR(rval);
+
+  // build full obb trees
+  rval = DAG->setup_obbs();
+  MB_CHK_ERR(rval);
 
 
 }
@@ -78,7 +89,8 @@ void tokenize( const std::string& str,
 }
 
 moab::ErrorCode get_tagged_vols(moab::Core *mbi,
-                                std::map<int, moab::Range> &tagged_vols_map)
+                                std::map<int, moab::Range> &tagged_vols_map, 
+                                float time_step_size)
 {
   moab::ErrorCode rval;
 
@@ -104,6 +116,7 @@ moab::ErrorCode get_tagged_vols(moab::Core *mbi,
    if( DAG->has_prop( vol, tag_name)){
      std::vector<std::string> tr_nums;
      rval = DAG->prop_values(vol, tag_name, tr_nums);
+     MB_CHK_SET_ERR(rval, "DAGMC failed to get metadata values");
      // get the value of each property (i.e. tag number)-- each vol can have more than one TR 
      for (int j = 0 ; j < tr_nums.size() ; j++) {
        bool added = false;
@@ -118,6 +131,8 @@ moab::ErrorCode get_tagged_vols(moab::Core *mbi,
             if(val == map_val){
               tagged_vols_map[map_val].insert(vol); 
               added = true;
+              rval = mbi->tag_set_data(dt_move_tag, &vol, 1, &time_step_size);
+              MB_CHK_SET_ERR(rval, "Failed to add dt_move_tag");
               break;
             }
          }//for each key in map
@@ -127,6 +142,8 @@ moab::ErrorCode get_tagged_vols(moab::Core *mbi,
          map_val = val;
          tagged_vols_map[map_val].insert(vol); 
          added = true;
+         rval = mbi->tag_set_data(dt_move_tag, &vol, 1, &time_step_size);
+         MB_CHK_SET_ERR(rval, "Failed to add dt_move_tag");
        }//if empty, create new key
      }// for each prop
    }//has prop
@@ -335,6 +352,36 @@ void set_transformation_distance(std::map<int, double [5]> tr_vec_map,
   tr.z = tr_vec_map[tr_num][2]*t;
 }
 
+moab::ErrorCode update_obb_trees(moab::Range moved_vols, moab::Core *mbi){
+  
+  moab::ErrorCode rval;
+  moab::GeomTopoTool *GTT = new moab::GeomTopoTool(mbi);
+
+  //delete IC vol tree (vol only-- preserve surface trees)
+  moab::EntityHandle impl_compl;
+  rval = GTT->get_implicit_complement(impl_compl);
+  MB_CHK_SET_ERR(rval, "Failed to get IC handle");
+
+  rval = GTT->delete_obb_tree(impl_compl, true);
+  MB_CHK_SET_ERR(rval, "Failed to delete IC vol obb tree");
+
+  //delete and rebuild obb trees of vols that moved
+  moab::Range::iterator it;
+  for(it = moved_vols.begin(); it!= moved_vols.end(); ++it){
+    rval = GTT->delete_obb_tree(*it, false);
+    MB_CHK_SET_ERR(rval, "Failed to delete vol obb tree");
+
+    rval = GTT->construct_obb_tree(*it);
+    MB_CHK_SET_ERR(rval, "Failed to rebuild vol obb tree");
+  }
+
+  //rebuild IC vol tree
+  rval = GTT->construct_obb_tree(impl_compl);
+  MB_CHK_SET_ERR(rval, "Failed to rebuild IC vol obb tree");
+
+  return moab::MB_SUCCESS;
+}
+
 void get_base_filename(std::string path, std::string &base){
 
   std::string full_filename = path.substr(path.find_last_of("/\\") + 1);
@@ -349,12 +396,20 @@ int main(int argc, char* argv[])
   char* gfilename = argv[1];
   char* tfilename = argv[2];
 
+  //process transformation text file info
+  std::map<int, double [5]> tr_vec_map;
+  int number_points = 1; //default is one time step
+  double total_time = 1.0; //default is 1 s
+  process_input(tfilename, tr_vec_map, number_points, total_time);
+  double time_step_size = total_time/number_points;
 
   rval = setup(mbi, gfilename);
-
   //get moving volumes and verts
+  // create tag handle for dt_mov
+  rval = mbi->tag_get_handle("MOVE_TAG", 32, moab::MB_TYPE_OPAQUE, dt_move_tag, 
+                             moab::MB_TAG_SPARSE|moab::MB_TAG_CREAT);
   std::map<int, moab::Range> tr_vols_map;
-  rval = get_tagged_vols(mbi, tr_vols_map);
+  rval = get_tagged_vols(mbi, tr_vols_map, time_step_size);
   moab::Range mv;
   std::map<int, moab::Range> tr_verts_map;
   rval = get_tagged_verts(tr_vols_map, mv, tr_verts_map);MB_CHK_ERR(rval);
@@ -363,12 +418,6 @@ int main(int argc, char* argv[])
   std::map<moab::EntityHandle, XYZ> position;
   rval = get_orig_vert_position(mv, position);
 
-  //process transformation text file info
-  std::map<int, double [5]> tr_vec_map;
-  int number_points = 1; //default is one time step
-  double total_time = 1.0; //default is 1 s
-  process_input(tfilename, tr_vec_map, number_points, total_time);
-  double time_step_size = total_time/number_points;
 
   // make sure # trs in geom file == # trs in text file
   if(tr_verts_map.size() != tr_vec_map.size()){
@@ -384,6 +433,8 @@ int main(int argc, char* argv[])
   double t = 0.0; //current time [s]
  
   while( t <= total_time) {
+    //create range of vols moved during each time step
+    moab::Range moved_vols;
     //for each TR #
     std::map<int, double[5]>::iterator itv;
     for(itv = tr_vec_map.begin(); itv != tr_vec_map.end(); ++itv){
@@ -392,6 +443,9 @@ int main(int argc, char* argv[])
       double end_time = (tr_vec_map[tr_num])[4];
       //if t is between start and end time, update pos of vol based on this TR
       if( t >= start_time && t <= end_time){
+       //add vols moved during this time step
+       moved_vols.insert(tr_vols_map[tr_num].begin(), tr_vols_map[tr_num].end());
+
        //create map of TR #'s to motion vectors
        XYZ trans_vec;
        set_transformation_distance(tr_vec_map, tr_num, t, trans_vec);
@@ -411,6 +465,9 @@ int main(int argc, char* argv[])
        }//move each vertex   
       }//if btwn st/et
     }//for each TR #
+
+    //update obb trees of moved vols
+    rval = update_obb_trees(moved_vols, mbi);
 
     std::string base;
     get_base_filename(std::string(gfilename), base);
