@@ -17,9 +17,10 @@
 #include <ctype.h>
 #include <string.h>
 
-moab::DagMC *DAG;
-moab::Core *mbi = new moab::Core;
+//moab::DagMC *DAG;
 //moab::GeomTopoTool *GTT;
+moab::Core *mbi = new moab::Core;
+moab::DagMC *DAG = new moab::DagMC(mbi);
 
 struct XYZ{
   double x;
@@ -29,23 +30,26 @@ struct XYZ{
 
 moab::Tag dt_move_tag;
 
-moab::ErrorCode setup(moab::Core *mbi, char* filename)
+moab::ErrorCode setup(//moab::Core *mbi, 
+                     char* filename)
+//                   moab::DagMC *DAG)
 {
   moab::ErrorCode rval;
 
-  DAG = new moab::DagMC(mbi);
- // moab::GeomTopoTool *GTT = new moab::GeomTopoTool(mbi);
+  //DAG = new moab::DagMC(mbi);
+  //moab::GeomTopoTool *GTT = new moab::GeomTopoTool(mbi);
 
   // load base geometry file that we wish to move
-  rval = mbi->load_file(filename);
+  //rval = mbi->load_file(filename);
+  rval = DAG->load_file(filename);
   MB_CHK_ERR(rval);
 
   rval = DAG->load_existing_contents();
   MB_CHK_ERR(rval);
 
   // find all geometry sets
- // rval = GTT->find_geomsets();
- // MB_CHK_SET_ERR(rval, "GeomTopoTool could not find the geometry sets");
+  // rval = GTT->find_geomsets();
+  // MB_CHK_SET_ERR(rval, "GeomTopoTool could not find the geometry sets");
 
   // setup indices
   rval = DAG->setup_indices();
@@ -58,7 +62,6 @@ moab::ErrorCode setup(moab::Core *mbi, char* filename)
   // build full obb trees
   rval = DAG->setup_obbs();
   MB_CHK_ERR(rval);
-
 
 }
 
@@ -88,9 +91,10 @@ void tokenize( const std::string& str,
     }
 }
 
-moab::ErrorCode get_tagged_vols(moab::Core *mbi,
+moab::ErrorCode get_tagged_vols(//moab::Core *mbi,
                                 std::map<int, moab::Range> &tagged_vols_map, 
                                 float time_step_size)
+//                                moab::DagMC *DAG)
 {
   moab::ErrorCode rval;
 
@@ -352,31 +356,32 @@ void set_transformation_distance(std::map<int, double [5]> tr_vec_map,
   tr.z = tr_vec_map[tr_num][2]*t;
 }
 
-moab::ErrorCode update_obb_trees(moab::Range moved_vols, moab::Core *mbi){
+moab::ErrorCode update_obb_trees(moab::Range moved_vols){
   
   moab::ErrorCode rval;
-  moab::GeomTopoTool *GTT = new moab::GeomTopoTool(mbi);
+  //moab::GeomTopoTool *GTT = new moab::GeomTopoTool(mbi);
 
   //delete IC vol tree (vol only-- preserve surface trees)
   moab::EntityHandle impl_compl;
-  rval = GTT->get_implicit_complement(impl_compl);
+  //rval = GTT->get_implicit_complement(impl_compl);
+  rval = DAG->geom_tool()->get_implicit_complement(impl_compl);
   MB_CHK_SET_ERR(rval, "Failed to get IC handle");
 
-  rval = GTT->delete_obb_tree(impl_compl, true);
+  rval = DAG->geom_tool()->delete_obb_tree(impl_compl, true);
   MB_CHK_SET_ERR(rval, "Failed to delete IC vol obb tree");
 
   //delete and rebuild obb trees of vols that moved
   moab::Range::iterator it;
   for(it = moved_vols.begin(); it!= moved_vols.end(); ++it){
-    rval = GTT->delete_obb_tree(*it, false);
+    rval = DAG->geom_tool()->delete_obb_tree(*it, false);
     MB_CHK_SET_ERR(rval, "Failed to delete vol obb tree");
 
-    rval = GTT->construct_obb_tree(*it);
+    rval = DAG->geom_tool()->construct_obb_tree(*it);
     MB_CHK_SET_ERR(rval, "Failed to rebuild vol obb tree");
   }
 
   //rebuild IC vol tree
-  rval = GTT->construct_obb_tree(impl_compl);
+  rval = DAG->geom_tool()->construct_obb_tree(impl_compl);
   MB_CHK_SET_ERR(rval, "Failed to rebuild IC vol obb tree");
 
   return moab::MB_SUCCESS;
@@ -403,13 +408,15 @@ int main(int argc, char* argv[])
   process_input(tfilename, tr_vec_map, number_points, total_time);
   double time_step_size = total_time/number_points;
 
-  rval = setup(mbi, gfilename);
+  // load meshfile into DAG
+  rval = setup(gfilename);
+
   //get moving volumes and verts
   // create tag handle for dt_mov
   rval = mbi->tag_get_handle("MOVE_TAG", 32, moab::MB_TYPE_OPAQUE, dt_move_tag, 
                              moab::MB_TAG_SPARSE|moab::MB_TAG_CREAT);
   std::map<int, moab::Range> tr_vols_map;
-  rval = get_tagged_vols(mbi, tr_vols_map, time_step_size);
+  rval = get_tagged_vols(tr_vols_map, time_step_size);
   moab::Range mv;
   std::map<int, moab::Range> tr_verts_map;
   rval = get_tagged_verts(tr_vols_map, mv, tr_verts_map);MB_CHK_ERR(rval);
@@ -431,6 +438,7 @@ int main(int argc, char* argv[])
   double xyz_new[3];
 
   double t = 0.0; //current time [s]
+  double tr_time; //amount of time to perform the TR [s]
  
   while( t <= total_time) {
     //create range of vols moved during each time step
@@ -442,13 +450,26 @@ int main(int argc, char* argv[])
       double start_time = (tr_vec_map[tr_num])[3];
       double end_time = (tr_vec_map[tr_num])[4];
       //if t is between start and end time, update pos of vol based on this TR
-      if( t >= start_time && t <= end_time){
+      //if( t > start_time && t <= end_time){
+      if( t > start_time ){
+        //if t is greater than start time and greater than end time, update pos
+        // according to this TR only until end of TR time
+        if( t >= end_time ){
+          tr_time = end_time-start_time;
+        }
+        else{
+          tr_time = t-start_time;
+        }
+       std::cout << "t , TR " << t << ", " << tr_num << std::endl;
+       std::cout << "st , et, trtime " << start_time << ", " << end_time<< ", "<< tr_time << std::endl;
+
        //add vols moved during this time step
        moved_vols.insert(tr_vols_map[tr_num].begin(), tr_vols_map[tr_num].end());
 
        //create map of TR #'s to motion vectors
        XYZ trans_vec;
-       set_transformation_distance(tr_vec_map, tr_num, t, trans_vec);
+       //set_transformation_distance(tr_vec_map, tr_num, t, trans_vec);
+       set_transformation_distance(tr_vec_map, tr_num, tr_time, trans_vec);
        //for each vert
        moab::Range::iterator itvt;
        for(itvt =  tr_verts_map[tr_num].begin(); itvt !=  tr_verts_map[tr_num].end(); ++itvt){
@@ -463,11 +484,14 @@ int main(int argc, char* argv[])
          rval = mbi->set_coords(&(*itvt), 1, xyz_new);
          MB_CHK_ERR(rval);
        }//move each vertex   
-      }//if btwn st/et
+       std::cout << "old, new x " << p_0.x<< ", " << xyz_new[0] << std::endl;
+       std::cout << "old, new y " << p_0.y<< ", " << xyz_new[1] << std::endl;
+       std::cout << "old, new z " << p_0.z<< ", " << xyz_new[2] << std::endl;
+      }//if > st, updating pos
     }//for each TR #
 
     //update obb trees of moved vols
-    rval = update_obb_trees(moved_vols, mbi);
+    rval = update_obb_trees(moved_vols);
 
     std::string base;
     get_base_filename(std::string(gfilename), base);
