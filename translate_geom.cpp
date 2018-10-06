@@ -356,6 +356,64 @@ void set_transformation_distance(std::map<int, double [5]> tr_vec_map,
   tr.z = tr_vec_map[tr_num][2]*t;
 }
 
+void map_time_step_to_delta(double overall_start_time,
+                            double overall_end_time,
+                            int num_time_steps,
+                            std::map< int, double[5]> tr_vec_map,
+                            std::map<int, double[3]> &ts_delta_map){
+                            //XYZ& ts_delta[]){
+
+  double time_step_size = (overall_end_time - overall_start_time)/num_time_steps;
+  double ts_start = 0.0;
+  double ts_end;
+  double tr_start;
+  double tr_end;
+  double dt;
+ 
+ 
+  //calculate the dx, dy, dz at each time step
+  for (int i = 1; i <= num_time_steps; i++){
+    //time step bounds
+    ts_end = ts_start + time_step_size;
+    // reset deltas to 0 for each new time step
+    double dx = 0.0;
+    double dy = 0.0;
+    double dz = 0.0;
+    //for each TR
+    std::map< int, double[5]>::iterator it;
+    for(it = tr_vec_map.begin(); it != tr_vec_map.end(); ++it){
+      tr_start = it->second[3];
+      tr_end = it->second[4];
+      if( tr_start >= ts_start && tr_start < ts_end){
+        //if the TR time is longer than the time step, apply the TR for only the time-step time
+        if( tr_end >= ts_end ){
+          dt = ts_end - tr_start;
+          //update the TR start time
+          //it->second[3] = tr_start + time_step_size;
+          it->second[3] = ts_end;
+        }
+        // if the TR is shorter than the time step, apply it for part of the time step
+        else{
+          dt = tr_end - tr_start;
+        }
+        // update the dx, dy, dz based on this TR
+        dx = dx + dt*(it->second[0]);
+        dy = dy + dt*(it->second[1]);
+        dz = dz + dt*(it->second[2]);
+      }
+    }
+    // save the delta for this time step
+    ts_delta_map[i][0] = dx;
+    ts_delta_map[i][1] = dy;
+    ts_delta_map[i][2] = dz;
+    
+    std::cout << "ts, dx, dy, dz " << i << ", " << dx << ", " << dy << ", " << dz << std::endl;
+    // update the time-step start time
+    ts_start = ts_end;
+  }
+
+}
+
 moab::ErrorCode update_obb_trees(moab::Range moved_vols){
   
   moab::ErrorCode rval;
@@ -407,6 +465,16 @@ int main(int argc, char* argv[])
   double total_time = 1.0; //default is 1 s
   process_input(tfilename, tr_vec_map, number_points, total_time);
   double time_step_size = total_time/number_points;
+
+  
+  double overall_start_time = 0.0;
+  std::map<int, double[3]> ts_delta_map;
+  map_time_step_to_delta(overall_start_time,
+                         total_time,
+                         number_points,
+                         tr_vec_map,
+                         ts_delta_map);
+                        
 
   // load meshfile into DAG
   rval = setup(gfilename);
