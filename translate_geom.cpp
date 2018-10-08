@@ -360,7 +360,7 @@ void map_time_step_to_delta(double overall_start_time,
                             double overall_end_time,
                             int num_time_steps,
                             std::map< int, double[5]> tr_vec_map,
-                            std::map<int, double[3]> &ts_delta_map){
+                            std::map<int, std::map<int, double[3]> > &ts_tr_delta_map){
                             //XYZ& ts_delta[]){
 
   double time_step_size = (overall_end_time - overall_start_time)/num_time_steps;
@@ -369,7 +369,8 @@ void map_time_step_to_delta(double overall_start_time,
   double tr_start;
   double tr_end;
   double dt;
- 
+  int tr_num;
+//  std::map<int, std::map<int, double [3]> > ts_tr_delta_map;
  
   //calculate the dx, dy, dz at each time step
   for (int i = 1; i <= num_time_steps; i++){
@@ -382,6 +383,7 @@ void map_time_step_to_delta(double overall_start_time,
     //for each TR
     std::map< int, double[5]>::iterator it;
     for(it = tr_vec_map.begin(); it != tr_vec_map.end(); ++it){
+      tr_num = it->first;
       tr_start = it->second[3];
       tr_end = it->second[4];
       if( tr_start >= ts_start && tr_start < ts_end){
@@ -397,17 +399,26 @@ void map_time_step_to_delta(double overall_start_time,
           dt = tr_end - tr_start;
         }
         // update the dx, dy, dz based on this TR
-        dx = dx + dt*(it->second[0]);
-        dy = dy + dt*(it->second[1]);
-        dz = dz + dt*(it->second[2]);
+        dx = dt*(it->second[0]);
+        dy = dt*(it->second[1]);
+        dz = dt*(it->second[2]);
+
+       //tr_delta[tr_num][0] = dt*(it->second[0]);
+       //tr_delta[tr_num][1] = dt*(it->second[1]);
+       //tr_delta[tr_num][2] = dt*(it->second[2]);
+
+        ts_tr_delta_map[i][tr_num][0] = dx;
+        ts_tr_delta_map[i][tr_num][1] = dy;
+        ts_tr_delta_map[i][tr_num][2] = dz;
+        std::cout << "ts, tr, dx, dy, dz " << i << ", " << tr_num << ", " << dx << ", " << dy << ", " << dz << std::endl;
       }
     }
     // save the delta for this time step
-    ts_delta_map[i][0] = dx;
-    ts_delta_map[i][1] = dy;
-    ts_delta_map[i][2] = dz;
+   // ts_delta_map[i][0] = dx;
+   // ts_delta_map[i][1] = dy;
+   // ts_delta_map[i][2] = dz;
     
-    std::cout << "ts, dx, dy, dz " << i << ", " << dx << ", " << dy << ", " << dz << std::endl;
+   // std::cout << "ts, dx, dy, dz " << i << ", " << dx << ", " << dy << ", " << dz << std::endl;
     // update the time-step start time
     ts_start = ts_end;
   }
@@ -468,12 +479,12 @@ int main(int argc, char* argv[])
 
   
   double overall_start_time = 0.0;
-  std::map<int, double[3]> ts_delta_map;
+  std::map<int, std::map<int, double[3]>> ts_tr_delta_map;
   map_time_step_to_delta(overall_start_time,
                          total_time,
                          number_points,
                          tr_vec_map,
-                         ts_delta_map);
+                         ts_tr_delta_map);
                         
 
   // load meshfile into DAG
@@ -504,71 +515,110 @@ int main(int argc, char* argv[])
   //Inital point, updated point
   XYZ p_0;
   double xyz_new[3];
+  double xyz_old[3];
 
   double t = 0.0; //current time [s]
   double tr_time; //amount of time to perform the TR [s]
+
+  std::string base;
+  get_base_filename(std::string(gfilename), base);
  
-  while( t <= total_time) {
-    //create range of vols moved during each time step
-    moab::Range moved_vols;
-    //for each TR #
-    std::map<int, double[5]>::iterator itv;
-    for(itv = tr_vec_map.begin(); itv != tr_vec_map.end(); ++itv){
-      int tr_num = itv->first;
-      double start_time = (tr_vec_map[tr_num])[3];
-      double end_time = (tr_vec_map[tr_num])[4];
-      //if t is between start and end time, update pos of vol based on this TR
-      //if( t > start_time && t <= end_time){
-      if( t > start_time ){
-        //if t is greater than start time and greater than end time, update pos
-        // according to this TR only until end of TR time
-        if( t >= end_time ){
-          tr_time = end_time-start_time;
-        }
-        else{
-          tr_time = t-start_time;
-        }
-       std::cout << "t , TR " << t << ", " << tr_num << std::endl;
-       std::cout << "st , et, trtime " << start_time << ", " << end_time<< ", "<< tr_time << std::endl;
+//  while( t <= total_time) {
+//    //create range of vols moved during each time step
+//    moab::Range moved_vols;
+//    //for each TR #
+//    std::map<int, double[5]>::iterator itv;
+//    for(itv = tr_vec_map.begin(); itv != tr_vec_map.end(); ++itv){
+//      int tr_num = itv->first;
+//      double start_time = (tr_vec_map[tr_num])[3];
+//      double end_time = (tr_vec_map[tr_num])[4];
+//      //if t is between start and end time, update pos of vol based on this TR
+//      //if( t > start_time && t <= end_time){
+//      if( t > start_time ){
+//        //if t is greater than start time and greater than end time, update pos
+//        // according to this TR only until end of TR time
+//        if( t >= end_time ){
+//          tr_time = end_time-start_time;
+//        }
+//        else{
+//          tr_time = t-start_time;
+//        }
+//       std::cout << "t , TR " << t << ", " << tr_num << std::endl;
+//       std::cout << "st , et, trtime " << start_time << ", " << end_time<< ", "<< tr_time << std::endl;
+//
+//       //add vols moved during this time step
+//       moved_vols.insert(tr_vols_map[tr_num].begin(), tr_vols_map[tr_num].end());
+//
+//       //create map of TR #'s to motion vectors
+//       XYZ trans_vec;
+//       //set_transformation_distance(tr_vec_map, tr_num, t, trans_vec);
+//       set_transformation_distance(tr_vec_map, tr_num, tr_time, trans_vec);
+//       //for each vert
+//       moab::Range::iterator itvt;
+//       for(itvt =  tr_verts_map[tr_num].begin(); itvt !=  tr_verts_map[tr_num].end(); ++itvt){
+//         //get original position
+//         p_0 = position[*itvt];
+//       
+//         //set the coordinates of the updated position  
+//         xyz_new[0] = p_0.x + trans_vec.x;
+//         xyz_new[1] = p_0.y + trans_vec.y;
+//         xyz_new[2] = p_0.z + trans_vec.z;
+//
+//         rval = mbi->set_coords(&(*itvt), 1, xyz_new);
+//         MB_CHK_ERR(rval);
+//       }//move each vertex   
+//       std::cout << "old, new x " << p_0.x<< ", " << xyz_new[0] << std::endl;
+//       std::cout << "old, new y " << p_0.y<< ", " << xyz_new[1] << std::endl;
+//       std::cout << "old, new z " << p_0.z<< ", " << xyz_new[2] << std::endl;
+//      }//if > st, updating pos
+//    }//for each TR #
+    
+    // loop over each time step
+    std::map< int, std::map<int, double[3]> >::iterator ts_it;
+    for( ts_it = ts_tr_delta_map.begin(); ts_it != ts_tr_delta_map.end(); ts_it++){
+//      std::cout << "ts " << ts_it->first << std::endl;
+      int ts = ts_it->first;
+      std::map<int, double[3]>::iterator tr_it;
+      //loop over each tr num
+      //for(int i = 0; i < ts_it->second.size(); i++){
+      for(tr_it = ts_tr_delta_map[ts].begin(); tr_it != ts_tr_delta_map[ts].end(); ++tr_it){
+ //     //  std::cout << "tr num " << ts_it->first << std::endl;
+ //     int tr_num = ts_tr_delta[ts];
+ //     std::cout << "ts_tr dx " << ts_tr_delta_map[ts][tr_num] << std::endl;
+        //std::cout << "ts tr [ts] .begin " << ts_tr_delta_map[ts].begin()->first << std::endl;
+//        std::cout << "ts tr [ts]  " << tr_it->first << std::endl;
+        int tr_num = tr_it->first;
+        std::cout << "ts, tr, dx " << ts << ", " << tr_num << ", " << tr_it->second[0] << std::endl;
+        //for each vert
+        moab::Range::iterator itvt;
+        for(itvt =  tr_verts_map[tr_num].begin(); itvt !=  tr_verts_map[tr_num].end(); ++itvt){
+          // get last position
+          rval = mbi->get_coords(&(*itvt), 1, xyz_old);
+          MB_CHK_ERR(rval);
+        
+          //set the coordinates of the updated position  
+          xyz_new[0] = xyz_old[0] + tr_it->second[0];
+          xyz_new[1] = xyz_old[1] + tr_it->second[1];
+          xyz_new[2] = xyz_old[2] + tr_it->second[2];
 
-       //add vols moved during this time step
-       moved_vols.insert(tr_vols_map[tr_num].begin(), tr_vols_map[tr_num].end());
-
-       //create map of TR #'s to motion vectors
-       XYZ trans_vec;
-       //set_transformation_distance(tr_vec_map, tr_num, t, trans_vec);
-       set_transformation_distance(tr_vec_map, tr_num, tr_time, trans_vec);
-       //for each vert
-       moab::Range::iterator itvt;
-       for(itvt =  tr_verts_map[tr_num].begin(); itvt !=  tr_verts_map[tr_num].end(); ++itvt){
-         //get original position
-         p_0 = position[*itvt];
-       
-         //set the coordinates of the updated position  
-         xyz_new[0] = p_0.x + trans_vec.x;
-         xyz_new[1] = p_0.y + trans_vec.y;
-         xyz_new[2] = p_0.z + trans_vec.z;
-
-         rval = mbi->set_coords(&(*itvt), 1, xyz_new);
-         MB_CHK_ERR(rval);
-       }//move each vertex   
-       std::cout << "old, new x " << p_0.x<< ", " << xyz_new[0] << std::endl;
-       std::cout << "old, new y " << p_0.y<< ", " << xyz_new[1] << std::endl;
-       std::cout << "old, new z " << p_0.z<< ", " << xyz_new[2] << std::endl;
-      }//if > st, updating pos
-    }//for each TR #
+          rval = mbi->set_coords(&(*itvt), 1, xyz_new);
+          MB_CHK_ERR(rval);
+        }//move each vertex   
+        
+      }
+      //std::string filenum = std::to_string(int(t));
+      std::string filenum = std::to_string(int(ts));
+      rval = mbi->write_mesh( (filenum+"_"+base+".h5m").c_str());
+      std::cout << "writing file for ts " << ts << std::endl;
+    }
 
     //update obb trees of moved vols
-    rval = update_obb_trees(moved_vols);
+//    rval = update_obb_trees(moved_vols);
 
-    std::string base;
-    get_base_filename(std::string(gfilename), base);
-    std::string filenum = std::to_string(int(t));
-    rval = mbi->write_mesh( (filenum+"_"+base+".h5m").c_str());
  
-    // update time
-    t = t+time_step_size; 
-  }//while
+//    // update time
+//    t = t+time_step_size; 
+//  }//while
       
 
   delete DAG;
