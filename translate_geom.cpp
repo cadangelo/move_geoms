@@ -17,8 +17,6 @@
 #include <ctype.h>
 #include <string.h>
 
-//moab::DagMC *DAG;
-//moab::GeomTopoTool *GTT;
 moab::Core *mbi = new moab::Core;
 moab::DagMC *DAG = new moab::DagMC(mbi);
 
@@ -30,26 +28,15 @@ struct XYZ{
 
 moab::Tag dt_move_tag;
 
-moab::ErrorCode setup(//moab::Core *mbi, 
-                     char* filename)
-//                   moab::DagMC *DAG)
+moab::ErrorCode setup( char* filename)
 {
   moab::ErrorCode rval;
 
-  //DAG = new moab::DagMC(mbi);
-  //moab::GeomTopoTool *GTT = new moab::GeomTopoTool(mbi);
-
   // load base geometry file that we wish to move
-  //rval = mbi->load_file(filename);
   rval = DAG->load_file(filename);
   MB_CHK_ERR(rval);
-
   rval = DAG->load_existing_contents();
   MB_CHK_ERR(rval);
-
-  // find all geometry sets
-  // rval = GTT->find_geomsets();
-  // MB_CHK_SET_ERR(rval, "GeomTopoTool could not find the geometry sets");
 
   // setup indices
   rval = DAG->setup_indices();
@@ -62,7 +49,6 @@ moab::ErrorCode setup(//moab::Core *mbi,
   // build full obb trees
   rval = DAG->setup_obbs();
   MB_CHK_ERR(rval);
-
 }
 
 void tokenize( const std::string& str, 
@@ -91,10 +77,8 @@ void tokenize( const std::string& str,
     }
 }
 
-moab::ErrorCode get_tagged_vols(//moab::Core *mbi,
-                                std::map<int, moab::Range> &tagged_vols_map, 
+moab::ErrorCode get_tagged_vols(std::map<int, moab::Range> &tagged_vols_map, 
                                 float time_step_size)
-//                                moab::DagMC *DAG)
 {
   moab::ErrorCode rval;
 
@@ -301,6 +285,7 @@ moab::ErrorCode get_tagged_verts(std::map<int, moab::Range> tagged_vols_map,
 //   // return rotated point
 //   return(q1);
 //}
+
 void process_input(char* tfilename, 
                    std::map< int, double[5]> &tr_vec_map,
                    int &number_points,
@@ -356,34 +341,32 @@ void set_transformation_distance(std::map<int, double [5]> tr_vec_map,
   tr.z = tr_vec_map[tr_num][2]*t;
 }
 
-void map_time_step_to_delta(double overall_start_time,
-                            double overall_end_time,
+void map_time_step_to_delta(double time_step_size,
                             int num_time_steps,
                             std::map< int, double[5]> tr_vec_map,
                             std::map<int, std::map<int, double[3]> > &ts_tr_delta_map){
-                            //XYZ& ts_delta[]){
 
-  double time_step_size = (overall_end_time - overall_start_time)/num_time_steps;
+//  double time_step_size = (overall_end_time - overall_start_time)/num_time_steps;
   double ts_start = 0.0;
   double ts_end;
   double tr_start;
   double tr_end;
   double dt;
   int tr_num;
-//  std::map<int, std::map<int, double [3]> > ts_tr_delta_map;
+  double dx, dy, dz;
+  double vx, vy, vz;
  
   //calculate the dx, dy, dz at each time step
-  for (int i = 1; i <= num_time_steps; i++){
+  for (int ts = 1; ts <= num_time_steps; ts++){
     //time step bounds
     ts_end = ts_start + time_step_size;
-    // reset deltas to 0 for each new time step
-    double dx = 0.0;
-    double dy = 0.0;
-    double dz = 0.0;
     //for each TR
     std::map< int, double[5]>::iterator it;
     for(it = tr_vec_map.begin(); it != tr_vec_map.end(); ++it){
       tr_num = it->first;
+      vx = it->second[0];
+      vy = it->second[1]; 
+      vz = it->second[2];  
       tr_start = it->second[3];
       tr_end = it->second[4];
       if( tr_start >= ts_start && tr_start < ts_end){
@@ -391,7 +374,6 @@ void map_time_step_to_delta(double overall_start_time,
         if( tr_end >= ts_end ){
           dt = ts_end - tr_start;
           //update the TR start time
-          //it->second[3] = tr_start + time_step_size;
           it->second[3] = ts_end;
         }
         // if the TR is shorter than the time step, apply it for part of the time step
@@ -399,30 +381,21 @@ void map_time_step_to_delta(double overall_start_time,
           dt = tr_end - tr_start;
         }
         // update the dx, dy, dz based on this TR
-        dx = dt*(it->second[0]);
-        dy = dt*(it->second[1]);
-        dz = dt*(it->second[2]);
-
-       //tr_delta[tr_num][0] = dt*(it->second[0]);
-       //tr_delta[tr_num][1] = dt*(it->second[1]);
-       //tr_delta[tr_num][2] = dt*(it->second[2]);
-
-        ts_tr_delta_map[i][tr_num][0] = dx;
-        ts_tr_delta_map[i][tr_num][1] = dy;
-        ts_tr_delta_map[i][tr_num][2] = dz;
-        std::cout << "ts, tr, dx, dy, dz " << i << ", " << tr_num << ", " << dx << ", " << dy << ", " << dz << std::endl;
+        dx = dt*vx;
+        dy = dt*vy;
+        dz = dt*vz;
+        
+        // set the delta value for this TR at this time step
+        ts_tr_delta_map[ts][tr_num][0] = dx;
+        ts_tr_delta_map[ts][tr_num][1] = dy;
+        ts_tr_delta_map[ts][tr_num][2] = dz;
+        std::cout << "ts, tr, dx, dy, dz " << ts << ", " << tr_num << ", " << dx << ", " << dy << ", " << dz << std::endl;
       }
     }
-    // save the delta for this time step
-   // ts_delta_map[i][0] = dx;
-   // ts_delta_map[i][1] = dy;
-   // ts_delta_map[i][2] = dz;
-    
-   // std::cout << "ts, dx, dy, dz " << i << ", " << dx << ", " << dy << ", " << dz << std::endl;
+
     // update the time-step start time
     ts_start = ts_end;
   }
-
 }
 
 moab::ErrorCode update_obb_trees(moab::Range moved_vols){
@@ -470,156 +443,91 @@ int main(int argc, char* argv[])
   char* gfilename = argv[1];
   char* tfilename = argv[2];
 
-  //process transformation text file info
-  std::map<int, double [5]> tr_vec_map;
-  int number_points = 1; //default is one time step
-  double total_time = 1.0; //default is 1 s
-  process_input(tfilename, tr_vec_map, number_points, total_time);
-  double time_step_size = total_time/number_points;
+  // get base of geom file name to be used when writing out files at each time step
+  std::string base;
+  get_base_filename(std::string(gfilename), base);
 
+  // process transformation text file info
+  std::map<int, double [5]> tr_vec_map;
+  int num_time_steps = 1; //default is one time step
+  double total_time = 1.0; //default is 1 s
+  process_input(tfilename, tr_vec_map, num_time_steps, total_time);
   
-  double overall_start_time = 0.0;
+  // calculate the dx, dy, dz of each TR during each time step
+  double time_step_size = total_time/num_time_steps;
   std::map<int, std::map<int, double[3]>> ts_tr_delta_map;
-  map_time_step_to_delta(overall_start_time,
-                         total_time,
-                         number_points,
-                         tr_vec_map,
-                         ts_tr_delta_map);
-                        
+  map_time_step_to_delta(time_step_size, num_time_steps, tr_vec_map, ts_tr_delta_map);
 
   // load meshfile into DAG
   rval = setup(gfilename);
+  MB_CHK_SET_ERR(rval, "Failed to setup meshfile");
 
-  //get moving volumes and verts
-  // create tag handle for dt_mov
+  // get moving volumes and verts
   rval = mbi->tag_get_handle("MOVE_TAG", 32, moab::MB_TYPE_OPAQUE, dt_move_tag, 
                              moab::MB_TAG_SPARSE|moab::MB_TAG_CREAT);
+  MB_CHK_SET_ERR(rval, "Failed to get tag handle");
   std::map<int, moab::Range> tr_vols_map;
   rval = get_tagged_vols(tr_vols_map, time_step_size);
+  MB_CHK_SET_ERR(rval, "Failed to get tagged volumes");
   moab::Range mv;
   std::map<int, moab::Range> tr_verts_map;
   rval = get_tagged_verts(tr_vols_map, mv, tr_verts_map);MB_CHK_ERR(rval);
+  MB_CHK_SET_ERR(rval, "Failed to get tagged verts");
  
-  // map of vertex eh to original position
-  std::map<moab::EntityHandle, XYZ> position;
-  rval = get_orig_vert_position(mv, position);
-
-
-  // make sure # trs in geom file == # trs in text file
+  // give warning if # trs in geom file != # trs in text file
   if(tr_verts_map.size() != tr_vec_map.size()){
     std::cout<< "Number of transitions found in geometry does not match number found in transformation text file." << std::endl;
     std::cout<< "There are " << tr_verts_map.size() << " transitions in the geometry file." << std::endl;
     std::cout<< "There are " << tr_vec_map.size() << " transitions in the text file." << std::endl;
   }
 
-  //Inital point, updated point
-  XYZ p_0;
+  //Inital/updated coordinates of moving vertices
   double xyz_new[3];
   double xyz_old[3];
-
-  double t = 0.0; //current time [s]
-  double tr_time; //amount of time to perform the TR [s]
-
-  std::string base;
-  get_base_filename(std::string(gfilename), base);
+  double dx; 
+  double dy;
+  double dz;
  
-//  while( t <= total_time) {
-//    //create range of vols moved during each time step
-//    moab::Range moved_vols;
-//    //for each TR #
-//    std::map<int, double[5]>::iterator itv;
-//    for(itv = tr_vec_map.begin(); itv != tr_vec_map.end(); ++itv){
-//      int tr_num = itv->first;
-//      double start_time = (tr_vec_map[tr_num])[3];
-//      double end_time = (tr_vec_map[tr_num])[4];
-//      //if t is between start and end time, update pos of vol based on this TR
-//      //if( t > start_time && t <= end_time){
-//      if( t > start_time ){
-//        //if t is greater than start time and greater than end time, update pos
-//        // according to this TR only until end of TR time
-//        if( t >= end_time ){
-//          tr_time = end_time-start_time;
-//        }
-//        else{
-//          tr_time = t-start_time;
-//        }
-//       std::cout << "t , TR " << t << ", " << tr_num << std::endl;
-//       std::cout << "st , et, trtime " << start_time << ", " << end_time<< ", "<< tr_time << std::endl;
-//
-//       //add vols moved during this time step
-//       moved_vols.insert(tr_vols_map[tr_num].begin(), tr_vols_map[tr_num].end());
-//
-//       //create map of TR #'s to motion vectors
-//       XYZ trans_vec;
-//       //set_transformation_distance(tr_vec_map, tr_num, t, trans_vec);
-//       set_transformation_distance(tr_vec_map, tr_num, tr_time, trans_vec);
-//       //for each vert
-//       moab::Range::iterator itvt;
-//       for(itvt =  tr_verts_map[tr_num].begin(); itvt !=  tr_verts_map[tr_num].end(); ++itvt){
-//         //get original position
-//         p_0 = position[*itvt];
-//       
-//         //set the coordinates of the updated position  
-//         xyz_new[0] = p_0.x + trans_vec.x;
-//         xyz_new[1] = p_0.y + trans_vec.y;
-//         xyz_new[2] = p_0.z + trans_vec.z;
-//
-//         rval = mbi->set_coords(&(*itvt), 1, xyz_new);
-//         MB_CHK_ERR(rval);
-//       }//move each vertex   
-//       std::cout << "old, new x " << p_0.x<< ", " << xyz_new[0] << std::endl;
-//       std::cout << "old, new y " << p_0.y<< ", " << xyz_new[1] << std::endl;
-//       std::cout << "old, new z " << p_0.z<< ", " << xyz_new[2] << std::endl;
-//      }//if > st, updating pos
-//    }//for each TR #
-    
-    // loop over each time step
-    std::map< int, std::map<int, double[3]> >::iterator ts_it;
-    for( ts_it = ts_tr_delta_map.begin(); ts_it != ts_tr_delta_map.end(); ts_it++){
-//      std::cout << "ts " << ts_it->first << std::endl;
-      int ts = ts_it->first;
-      std::map<int, double[3]>::iterator tr_it;
-      //loop over each tr num
-      //for(int i = 0; i < ts_it->second.size(); i++){
-      for(tr_it = ts_tr_delta_map[ts].begin(); tr_it != ts_tr_delta_map[ts].end(); ++tr_it){
- //     //  std::cout << "tr num " << ts_it->first << std::endl;
- //     int tr_num = ts_tr_delta[ts];
- //     std::cout << "ts_tr dx " << ts_tr_delta_map[ts][tr_num] << std::endl;
-        //std::cout << "ts tr [ts] .begin " << ts_tr_delta_map[ts].begin()->first << std::endl;
-//        std::cout << "ts tr [ts]  " << tr_it->first << std::endl;
-        int tr_num = tr_it->first;
-        std::cout << "ts, tr, dx " << ts << ", " << tr_num << ", " << tr_it->second[0] << std::endl;
-        //for each vert
-        moab::Range::iterator itvt;
-        for(itvt =  tr_verts_map[tr_num].begin(); itvt !=  tr_verts_map[tr_num].end(); ++itvt){
-          // get last position
-          rval = mbi->get_coords(&(*itvt), 1, xyz_old);
-          MB_CHK_ERR(rval);
-        
-          //set the coordinates of the updated position  
-          xyz_new[0] = xyz_old[0] + tr_it->second[0];
-          xyz_new[1] = xyz_old[1] + tr_it->second[1];
-          xyz_new[2] = xyz_old[2] + tr_it->second[2];
-
-          rval = mbi->set_coords(&(*itvt), 1, xyz_new);
-          MB_CHK_ERR(rval);
-        }//move each vertex   
-        
-      }
-      //std::string filenum = std::to_string(int(t));
-      std::string filenum = std::to_string(int(ts));
-      rval = mbi->write_mesh( (filenum+"_"+base+".h5m").c_str());
-      std::cout << "writing file for ts " << ts << std::endl;
-    }
-
-    //update obb trees of moved vols
-//    rval = update_obb_trees(moved_vols);
-
- 
-//    // update time
-//    t = t+time_step_size; 
-//  }//while
+  // loop over each time step
+  std::map< int, std::map<int, double[3]> >::iterator ts_it;
+  for( ts_it = ts_tr_delta_map.begin(); ts_it != ts_tr_delta_map.end(); ts_it++){
+    int ts = ts_it->first;
+    //create range of vols moved during each time step
+    moab::Range moved_vols;
+    //loop over each tr num occuring  during this time step
+    std::map<int, double[3]>::iterator tr_it;
+    for(tr_it = ts_tr_delta_map[ts].begin(); tr_it != ts_tr_delta_map[ts].end(); ++tr_it){
+      int tr_num = tr_it->first;
+      dx = tr_it->second[0];
+      dy = tr_it->second[1];
+      dz = tr_it->second[2];
+      //add vols moved during this time step
+      moved_vols.insert(tr_vols_map[tr_num].begin(), tr_vols_map[tr_num].end());
+      //for each vert
+      moab::Range::iterator itvt;
+      for(itvt =  tr_verts_map[tr_num].begin(); itvt !=  tr_verts_map[tr_num].end(); ++itvt){
+        // get last position
+        rval = mbi->get_coords(&(*itvt), 1, xyz_old);
+        MB_CHK_SET_ERR(rval, "Failed to get coords");
       
+        //set the coordinates of the updated position  
+        xyz_new[0] = xyz_old[0] + dx;
+        xyz_new[1] = xyz_old[1] + dy;
+        xyz_new[2] = xyz_old[2] + dz;
+
+        rval = mbi->set_coords(&(*itvt), 1, xyz_new);
+        MB_CHK_SET_ERR(rval, "Failed to set coords");
+      }//move each vertex   
+    }
+    //update obb trees of moved vols
+    rval = update_obb_trees(moved_vols);
+    MB_CHK_SET_ERR(rval, "Failed to update obb trees");
+
+    // write out h5m file for this time step
+    std::string filenum = std::to_string(int(ts));
+    rval = mbi->write_mesh( (filenum+"_"+base+".h5m").c_str());
+    MB_CHK_SET_ERR(rval, "Failed to write out h5m file");
+  }
 
   delete DAG;
   return 0;
