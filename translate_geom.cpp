@@ -1,3 +1,4 @@
+#include <boost/program_options.hpp>
 #include <iostream>
 #include "moab/Core.hpp"
 #include "moab/Interface.hpp"
@@ -17,6 +18,8 @@
 #include <ctype.h>
 #include <string.h>
 
+namespace po = boost::program_options;
+
 moab::Core *mbi = new moab::Core;
 moab::DagMC *DAG = new moab::DagMC(mbi);
 
@@ -28,12 +31,57 @@ struct XYZ{
 
 moab::Tag dt_move_tag;
 
-moab::ErrorCode setup( char* filename)
+moab::ErrorCode setup(int argc, char* argv[], bool &obbs, bool &expand,
+                      std::string &gfilename, std::string &tfilename)
 {
-  moab::ErrorCode rval;
+  // process command line flags
+  po::options_description desc("Allowed options");
+  desc.add_options()
+      ("help", "Help message")
+      ("obbs", po::value<bool>(), "Is this a geom that needs obbs?")
+//      ("expand", po::value<bool>(), "Expand vector tags?")
+      ("geom", po::value<std::string>(), "Geom file name")
+      ("trans", po::value<std::string>(), "Translation text file name")
+  ;
 
+  po::variables_map vm;
+  po::store(po::parse_command_line(argc, argv, desc), vm);
+  po::notify(vm);    
+  
+  if (vm.count("help")) {
+      std::cout << desc << std::endl;
+      return moab::MB_FAILURE;
+  }
+  
+  if (vm.count("obbs")) {
+      std::cout << "Obbs? " << vm["obbs"].as<bool>() << std::endl;
+      obbs = vm["obbs"].as<bool>();
+  } else {
+      std::cout << "Obb flag not set." << std::endl;;
+  }
+
+//  if (vm.count("expand")) {
+//      std::cout << "Expand tags? " << vm["expand"].as<bool>() << std::endl;
+//      expand = vm["expand"].as<bool>();
+//  } else {
+//      std::cout << "Expand flag not set." << std::endl;;
+//  }
+  if (vm.count("geom")) {
+      std::cout << "Geom file name " << vm["geom"].as<std::string>() << std::endl;
+      gfilename =  vm["geom"].as<std::string>();
+  } else {
+      std::cout << "Geom file not set." << std::endl;;
+  }
+  if (vm.count("trans")) {
+      std::cout << "Trans file name " << vm["trans"].as<std::string>() << std::endl;
+      tfilename =  vm["trans"].as<std::string>();
+  } else {
+      std::cout << "Translation file not set." << std::endl;;
+  }
+
+  moab::ErrorCode rval;
   // load base geometry file that we wish to move
-  rval = DAG->load_file(filename);
+  rval = DAG->load_file(gfilename.c_str());
   MB_CHK_ERR(rval);
   rval = DAG->load_existing_contents();
   MB_CHK_ERR(rval);
@@ -46,9 +94,13 @@ moab::ErrorCode setup( char* filename)
   rval = DAG->setup_impl_compl();
   MB_CHK_ERR(rval);
 
-  // build full obb trees
-  rval = DAG->setup_obbs();
-  MB_CHK_ERR(rval);
+  if(obbs){
+    // build full obb trees
+    rval = DAG->setup_obbs();
+    MB_CHK_ERR(rval);
+  }
+ 
+  return moab::MB_SUCCESS;
 }
 
 void tokenize( const std::string& str, 
@@ -286,7 +338,7 @@ moab::ErrorCode get_tagged_verts(std::map<int, moab::Range> tagged_vols_map,
 //   return(q1);
 //}
 
-void process_input(char* tfilename, 
+void process_input(std::string tfilename, 
                    std::map< int, double[5]> &tr_vec_map,
                    int &number_points,
                    double &total_time)
@@ -440,12 +492,16 @@ int main(int argc, char* argv[])
 {
   moab::ErrorCode rval; 
  
-  char* gfilename = argv[1];
-  char* tfilename = argv[2];
+  bool obbs, expand;
+  std::string gfilename;
+  std::string tfilename;
+  rval = setup(argc, argv, obbs, expand, gfilename, tfilename);
+  MB_CHK_SET_ERR(rval, "Failed to setup meshfile");
 
   // get base of geom file name to be used when writing out files at each time step
   std::string base;
   get_base_filename(std::string(gfilename), base);
+  std::cout << "base " << base << std::endl;
 
   // process transformation text file info
   std::map<int, double [5]> tr_vec_map;
@@ -458,9 +514,6 @@ int main(int argc, char* argv[])
   std::map<int, std::map<int, double[3]>> ts_tr_delta_map;
   map_time_step_to_delta(time_step_size, num_time_steps, tr_vec_map, ts_tr_delta_map);
 
-  // load meshfile into DAG
-  rval = setup(gfilename);
-  MB_CHK_SET_ERR(rval, "Failed to setup meshfile");
 
   // get moving volumes and verts
   rval = mbi->tag_get_handle("MOVE_TAG", 32, moab::MB_TYPE_OPAQUE, dt_move_tag, 
@@ -519,13 +572,16 @@ int main(int argc, char* argv[])
         MB_CHK_SET_ERR(rval, "Failed to set coords");
       }//move each vertex   
     }
+
+    if(obbs){
     //update obb trees of moved vols
-    rval = update_obb_trees(moved_vols);
-    MB_CHK_SET_ERR(rval, "Failed to update obb trees");
+      rval = update_obb_trees(moved_vols);
+      MB_CHK_SET_ERR(rval, "Failed to update obb trees");
+    }
 
     // write out h5m file for this time step
     std::string filenum = std::to_string(int(ts));
-    rval = mbi->write_mesh( (filenum+"_"+base+".h5m").c_str());
+    rval = mbi->write_mesh( (base+"_"+filenum+".h5m").c_str());
     MB_CHK_SET_ERR(rval, "Failed to write out h5m file");
   }
 
